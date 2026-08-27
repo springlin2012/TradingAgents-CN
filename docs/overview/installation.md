@@ -1,4 +1,10 @@
-# 详细安装指南
+# 详细安装指南 **【过时】**
+
+> ⚠️ **文档状态：过时（历史安装参考）**。本文档包含旧版项目地址、`requirements.txt`、Pipenv 和通用 Dockerfile 等内容，不适用于当前 TradingAgents-CN `v1.0.1` 的主启动流程。
+>
+> 当前版本请阅读：[v1.0.1 多系统启动方式](../guides/启动方式_v1.0.1_20260827.md)。该指南以当前 `pyproject.toml` 和根目录 `docker-compose.yml` 为准，使用 `uv pip install -e .` 安装依赖，并通过 FastAPI + Vue（默认端口 8000/3000）启动服务。
+>
+> 本文档仅保留用于历史参考；其中的安装命令、项目地址、Docker 示例和 API Key 检查项请勿直接照搬。
 
 ## 概述
 
