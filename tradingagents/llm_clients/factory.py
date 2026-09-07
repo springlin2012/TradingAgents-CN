@@ -19,6 +19,8 @@ _OPENAI_COMPATIBLE = {
     "qianfan",
     "openrouter",
     "aihubmix",
+    "volcengine",
+    "volcengine_coding",
     "ollama",
     "custom_openai",
 }
