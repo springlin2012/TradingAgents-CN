@@ -30,6 +30,7 @@ Recent history uses Conventional Commit-style prefixes such as `feat:`, `fix:`, 
 
 Never commit secrets. Copy `.env.example` to `.env` for local keys and service settings. Check configuration precedence carefully: model settings, provider settings, environment variables, MongoDB, Redis, and external market-data APIs can all affect runtime behavior.
 
+## Security & Configuration Tips
 
 ## ⚠ 强制规则：规则文件更新与重新加载
 
@@ -38,5 +39,11 @@ Never commit secrets. Copy `.env.example` to `.env` for local keys and service s
 - 若 AI 本轮修改了 `AGENTS.md` 或 `CLAUDE.md`，修改完成后必须立即重新读取 `AGENTS.md` 和 `CLAUDE.md`，再继续执行后续任务或总结。
 
 ## ⚠ 强制规则
+
 - 我是中文用户，在生成文档内容及文档命名时请使用中文，请勿使用英文。
 
+
+## 文档管理
+
+- 新建文档统一写入当前项目 `docs/` 下按类型划分的子目录：需求 `prd/`、设计 `design/`、分析 `analysis/`、配置 `config/`、规范 `standards/` 、模版 `template/` 等；未列出的类型按同样模式新建语义化子目录，不要堆在 `docs/` 根下。
+- 文件命名用格式：`文件名称_yyyyMMdd` 如：`TEST_20220301.md`。
