@@ -176,7 +176,7 @@
 
 在使用前，建议先阅读详细的使用指南：
 - **[v1.1.0 发布说明](./docs/releases/v1.1.0-release-notes.md)**
-- **[v1.1.0 使用手册](./docs/guides/v1.1.0-user-manual.md)**
+- **[v1.1.0 使用手册](./docs/guides/v1.0.1-user-manual.md)**
 - **[v1.1.0 升级指南](./docs/releases/upgrade-guide.md)**
 - **[完整更新日志](./docs/releases/CHANGELOG.md)**
 - **[0、📘 TradingAgents-CN v1.0.0-preview 快速入门视频](https://www.bilibili.com/video/BV1i2CeBwEP7/?vd_source=5d790a5b8d2f46d2c10fd4e770be1594)**

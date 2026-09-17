@@ -32,6 +32,11 @@ Never commit secrets. Copy `.env.example` to `.env` for local keys and service s
 
 ## Security & Configuration Tips
 
+## 项目架构及问题解决
+- 每次分析系统问题时，必须先阅读 `docs/guides/系统问题分析过程指南_20260917.md`，并按文档中的日志入口、故障边界、证据等级和输出模板执行分析。
+- 分析系统问题时先阅读 `TradingAgents-CN开发问题解决指南.md` 寻找历史解决方案。
+- 了解项目和系统架构，系统功能时先阅读 `项目知识库索引.md`。
+
 ## ⚠ 强制规则：规则文件更新与重新加载
 
 - `AGENTS.md`、`CLAUDE.md`、等协作规则文件发生更新后，AI 必须自动重新读取对应规则文件，不依赖用户再次提示。

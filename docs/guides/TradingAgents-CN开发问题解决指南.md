@@ -1,8 +1,8 @@
-# TradingAgents-CN 默认登录密码问题解决指南
+# TradingAgents-CN 开发问题解决指南
 
 > 适用范围：当前 Vue + FastAPI + MongoDB 主应用，以及仓库中保留的旧版 Web/Streamlit 登录模块。
 >
-> 更新时间：2026-09-07
+> 更新时间：2026-09-17
 
 ## 场景总览
 
@@ -14,6 +14,7 @@
 | 场景四：脚本缺少依赖 | `No module named 'pymongo'` | [场景四](#场景四脚本缺少-pymongo-依赖) |
 | 场景五：使用旧版 Web | 运行 `web/` 界面或 JSON 用户配置 | [场景五](#场景五旧版-webstreamlit-登录) |
 | 场景六：密码已改仍失败 | 返回 401、连接错库、前端状态异常 | [场景六](#场景六密码已改仍无法登录) |
+| 场景七：阿里云百炼 API 测试失败 | 厂家配置测试返回 HTTP 401，修改 `default_base_url` 后仍失败 | [场景七](#场景七阿里云百炼-api-测试返回-http-401) |
 
 ## 场景一：正常登录后修改密码
 
@@ -223,6 +224,163 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8000/api/auth/login" -Cont
 
 成功响应应包含 `success: true` 和 `data.access_token`。后端日志重点区分“用户不存在”“密码错误”“数据库连接失败”。
 
+## 场景七：阿里云百炼 API 测试返回 HTTP 401
+
+### 7.1 现象与结论
+
+在厂家配置页面测试阿里云百炼 API 时返回：
+
+```text
+阿里云百炼 API测试失败: HTTP 401
+```
+
+排查期间，MongoDB 中 DashScope 厂家的 `default_base_url` 已修改为：
+
+```text
+https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+```
+
+本次厂家测试使用的模型为 `qwen3.6-flash`。已有日志返回 `invalid_api_key`，说明请求在认证阶段失败，早于正常的模型可用性判断，因此模型名称不是本次故障的首要原因。
+
+核心结论是：厂家测试入口虽然读取了 MongoDB 的 `default_base_url`，但 DashScope 分支没有把该值传入实际测试方法；同时，排查时运行中的后端早于相关源码修改启动，没有加载最新实现。修改数据库地址并不能单独解决问题，仍需确认实际请求端点与 API Key 是否匹配。
+
+### 7.2 配置与数据类问题
+
+#### MongoDB 配置在哪个集合
+
+MongoDB 中没有关系数据库的“表”，对应概念是集合。DashScope 厂家配置位于：
+
+```text
+集合：llm_providers
+文档条件：name = "dashscope"
+地址字段：default_base_url
+模型字段：test_model
+密钥字段：api_key
+```
+
+配置结构示例：
+
+```json
+{
+  "name": "dashscope",
+  "api_key": "已脱敏",
+  "test_model": "qwen3.6-flash",
+  "default_base_url": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+}
+```
+
+`default_base_url` 只能保存纯 URL，不应包含中文标点、“请帮我替换”等说明文字。厂家测试优先使用 MongoDB 中通过基础格式校验的 `api_key`；只有数据库 Key 无效时才回退环境变量。因此，只修改 `.env` 不一定会改变实际请求所用的 Key。
+
+### 7.3 代码实现类问题
+
+厂家默认配置和初始化逻辑主要位于：
+
+```text
+app/scripts/init_providers.py
+```
+
+厂家 API 测试、MongoDB 配置读取及 DashScope 请求实现主要位于：
+
+```text
+app/services/config_service.py
+app/services/config_service.py::_test_dashscope_api
+```
+
+测试入口会读取：
+
+```python
+base_url = provider_data.get("default_base_url")
+test_model = provider_data.get("test_model")
+```
+
+但进入 DashScope 分支时只传递了 API Key、厂家显示名称和测试模型，没有把 `base_url` 传给 `_test_dashscope_api()`。因此，即使 MongoDB 中的地址保存成功，当前厂家测试也不会消费该字段。工作树中的请求地址曾直接硬编码为 `token-plan` 专属地址，修改前则使用公共地址：
+
+```text
+https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+```
+
+建议把 `base_url` 作为明确的关键字参数传入，优先使用厂家配置，未配置时回退公共地址，并规范尾部斜杠：
+
+```python
+base_url = (
+    base_url
+    or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+).rstrip("/")
+url = f"{base_url}/chat/completions"
+```
+
+使用关键字参数可避免后续扩展时把 `test_model` 与 `base_url` 等位置参数传错。
+
+### 7.4 服务运行与部署类问题
+
+排查时后端进程与源码时间如下：
+
+```text
+后端启动命令：python -m app
+后端启动时间：2026-09-15 18:06:21
+相关源码修改时间：2026-09-17 16:52:23
+```
+
+后端启动时间早于源码修改时间。如果没有启用并触发热重载，运行进程仍会执行启动时加载的旧实现，可能继续请求公共 DashScope 地址。数据库配置读取、代码参数传递和运行进程版本应分别验证，不能把数据库修改与源码修改混为一谈。修改代码后必须重启后端，再进行厂家测试。
+
+### 7.5 API 认证与端点匹配类问题
+
+历史错误日志中存在阿里云返回的完整错误：
+
+```text
+HTTP 401
+code: invalid_api_key
+message: Incorrect API key provided.
+request_id: 9d22bb3e-202e-9769-9612-cf68df74f121
+```
+
+该日志来自分析请求，不一定与本次点击“厂家测试”是同一条请求，但能证明系统中实际使用过的某个阿里云 API Key 曾被服务端判定无效。本地格式校验通过只代表字符串形式正常，并不代表阿里云认证成功。常见原因包括：
+
+1. Coding Plan 或专属套餐 Key 被旧进程发送到公共 DashScope 地址；
+2. API Key 与北京地域 `token-plan` 实例不匹配；
+3. API Key 所属账号或 Workspace 与当前实例不一致；
+4. API Key 已撤销、过期或复制不完整；
+5. MongoDB 中保存的并非预期的专属 Key。
+
+根据现有证据，根因优先级为：
+
+1. 运行中的后端没有加载源码修改；
+2. DashScope 厂家测试没有使用 MongoDB 的 `default_base_url`；
+3. 实际 API Key 与端点、地域、账号或 Workspace 不匹配，或者 Key 已失效；
+4. Coding Plan 专属 Key 被旧进程发往公共端点。
+
+### 7.6 日志与可观测性类问题
+
+当前厂家测试在非 200 响应时只显示 HTTP 状态码，没有记录实际 URL、测试模型、阿里云 `error.code`、`error.message` 和 `request_id`。因此，仅凭页面上的 HTTP 401 无法确认请求命中了公共地址还是 `token-plan` 专属地址。
+
+建议安全记录以下内容：
+
+- 实际请求 URL 或 Host；
+- 测试模型和配置来源；
+- HTTP 状态码；
+- 阿里云错误码、错误消息和 `request_id`。
+
+不得记录完整 API Key 或 Authorization 请求头。
+
+### 7.7 自动化测试与验证类问题
+
+修复代码时应补充以下验证：
+
+1. MongoDB 自定义 `default_base_url` 被 DashScope 厂家测试实际使用；
+2. 带或不带尾部 `/` 的地址都能正确拼接；
+3. 未配置自定义地址时回退公共 DashScope 地址；
+4. `test_model` 与 `base_url` 独立、正确传递；
+5. HTTP 401 的诊断信息完整且不泄露 API Key。
+
+### 7.8 建议处理顺序
+
+1. 确认 MongoDB `llm_providers` 集合中 `name = "dashscope"` 文档的地址只包含正确 URL；
+2. 修复 DashScope 测试调用，使 `default_base_url` 真正传入 `_test_dashscope_api()`；
+3. 重启 `python -m app` 后端，使最新代码生效；
+4. 重新执行厂家 API 测试并记录脱敏后的实际 URL、模型、错误码和 `request_id`；
+5. 确认 MongoDB 中的 API Key 属于北京地域对应的 Coding Plan 或专属实例；
+6. 若仍返回 `invalid_api_key`，继续核对 Key 的账号、Workspace、地域及有效状态。
+
 ## 共性背景：默认值和认证链路
 
 - 新部署初始化通常使用 `admin / admin123`；
@@ -250,6 +408,8 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8000/api/auth/login" -Cont
 - `app/main.py`
 - `app/routers/auth_db.py`
 - `app/services/user_service.py`
+- `app/services/config_service.py`
+- `app/scripts/init_providers.py`
 - `scripts/create_default_admin.py`
 - `scripts/user_password_manager.py`
 - `scripts/docker_deployment_init.py`
