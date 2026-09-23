@@ -232,7 +232,7 @@ class ChatDashScopeOpenAIUnified(OpenAICompatibleBase):
             provider_name="dashscope",
             model=model,
             api_key_env_var="DASHSCOPE_API_KEY",
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            base_url="https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
             api_key=api_key,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -440,7 +440,7 @@ OPENAI_COMPATIBLE_PROVIDERS = {
     },
     "dashscope": {
         "adapter_class": ChatDashScopeOpenAIUnified,
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "base_url": "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
         "api_key_env": "DASHSCOPE_API_KEY",
         "models": {
             "qwen-turbo": {"context_length": 8192, "supports_function_calling": True},

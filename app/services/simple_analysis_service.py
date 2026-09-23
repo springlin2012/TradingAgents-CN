@@ -167,7 +167,11 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
                     from tradingagents.llm_clients.provider_keys import normalize_provider_key, default_backend_url
 
                     provider_key = normalize_provider_key(provider)
-                    if provider_key == "qwen" and backend_url == "https://dashscope.aliyuncs.com/api/v1":
+                    if provider_key == "qwen" and backend_url in {
+                        "https://dashscope.aliyuncs.com/api/v1",
+                        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+                    }:
                         backend_url = default_backend_url(provider_key)
 
                     client.close()
@@ -213,7 +217,11 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
             from tradingagents.llm_clients.provider_keys import normalize_provider_key, default_backend_url
 
             provider_key = normalize_provider_key(provider)
-            if provider_key == "qwen" and backend_url == "https://dashscope.aliyuncs.com/api/v1":
+            if provider_key == "qwen" and backend_url in {
+                "https://dashscope.aliyuncs.com/api/v1",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            }:
                 backend_url = default_backend_url(provider_key)
 
             client.close()

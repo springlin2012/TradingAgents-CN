@@ -71,7 +71,7 @@ def default_backend_url(provider: str) -> str:
     key = normalize_provider_key(provider)
     default_urls = {
         "google": "https://generativelanguage.googleapis.com/v1beta",
-        "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "qwen": "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
         "openai": "https://api.openai.com/v1",
         "deepseek": "https://api.deepseek.com",
         "anthropic": "https://api.anthropic.com",
@@ -88,7 +88,7 @@ def default_backend_url(provider: str) -> str:
         "siliconflow": "https://api.siliconflow.cn/v1",
         "glm": "https://open.bigmodel.cn/api/paas/v4/",
     }
-    return default_urls.get(key, "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    return default_urls.get(key, "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1")
 
 
 def canonical_aliases(provider: str) -> list[str]:

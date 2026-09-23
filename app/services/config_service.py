@@ -484,7 +484,7 @@ class ConfigService:
                     provider=ModelProvider.QWEN,
                     model_name="qwen-turbo",
                     api_key="your-qwen-api-key",
-                    api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    api_base="https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
                     max_tokens=4000,
                     temperature=0.7,
                     enabled=False,
@@ -3502,7 +3502,7 @@ class ConfigService:
                     "description": "阿里云百炼大模型服务平台，提供通义千问等模型",
                     "website": "https://bailian.console.aliyun.com",
                     "api_doc_url": "https://help.aliyun.com/zh/dashscope/",
-                    "default_base_url": "https://dashscope.aliyuncs.com/api/v1",
+                    "default_base_url": "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
                     "aliases": canonical_aliases("qwen"),
                     "supported_features": [
                         "chat",
@@ -4016,7 +4016,7 @@ class ConfigService:
             logger.info(f"🔍 [DashScope 测试] 使用模型: {model_name}")
 
             # 使用阿里云百炼的OpenAI兼容接口
-            url = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"
+            url = "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1/chat/completions"
 
             headers = {
                 "Content-Type": "application/json",

@@ -119,7 +119,7 @@ async def init_providers():
             "description": "阿里云百炼大模型服务平台，提供通义千问等模型",
             "website": "https://bailian.console.aliyun.com",
             "api_doc_url": "https://help.aliyun.com/zh/dashscope/",
-            "default_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "default_base_url": "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
             "aliases": canonical_aliases("qwen"),
             "is_active": True,
             "test_model": "qwen-turbo",
