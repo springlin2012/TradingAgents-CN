@@ -52,7 +52,24 @@ def create_trader(llm, memory):
 
         context = {
             "role": "user",
-            "content": f"Based on a comprehensive analysis by a team of analysts, here is an investment plan tailored for {company_name}. This plan incorporates insights from current technical market trends, macroeconomic indicators, and social media sentiment. Use this plan as a foundation for evaluating your next trading decision.\n\nProposed Investment Plan: {investment_plan}\n\nLeverage these insights to make an informed and strategic decision.",
+            "content": f"""请基于以下研究经理计划和上游分析报告，为 {company_name} 制定最终交易决策。研究经理计划是决策基础；上游报告用于核验价格、基本面、情绪和催化信息，不能忽略。
+
+研究经理投资计划：
+{investment_plan}
+
+市场与技术分析：
+{market_research_report}
+
+基本面与估值分析：
+{fundamentals_report}
+
+市场情绪分析：
+{sentiment_report}
+
+新闻与政策分析：
+{news_report}
+
+请综合上述信息给出明确、可执行的交易建议。""",
         }
 
         messages = [

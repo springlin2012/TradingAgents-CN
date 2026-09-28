@@ -821,10 +821,15 @@ class StockDataPreparer:
                     # 2.2 同步财务数据
                     logger.info(f"📊 [数据同步] 同步财务数据...")
                     try:
-                        fin_result = await service.sync_financial_data(
-                            symbols=[stock_code],
-                            limit=20  # 获取最近20期财报（约5年）
-                        )
+                        if data_source == "tushare":
+                            fin_result = await service.sync_financial_data(
+                                symbols=[stock_code],
+                                limit=20  # 获取最近20期财报（约5年）
+                            )
+                        else:
+                            fin_result = await service.sync_financial_data(
+                                symbols=[stock_code]
+                            )
 
                         if fin_result.get("success_count", 0) > 0:
                             financial_synced = True

@@ -1,6 +1,6 @@
 # TradingAgents 百问百答
 
-> 更新日期：2026-09-15
+> 更新日期：2026-09-24
 
 ## 1. 项目中的 AKShare 数据源是什么？
 
@@ -132,3 +132,26 @@ POST /api/stock-sync/single
 - `frontend/src/api/stockSync.ts`：单股同步接口封装；
 - `app/routers/stock_sync.py`：单股同步 API 及落库逻辑；
 - `app/worker/akshare_sync_service.py`：AKShare 行情和历史数据同步服务。
+
+## 4. Tushare 是什么？
+
+Tushare 是一个面向中国金融市场的财经数据接口平台，同时提供 Python 数据库和 Tushare Pro API，主要用于量化交易、投资研究和金融数据分析。
+
+Tushare 可以提供以下类型的数据：
+
+- A 股股票基本信息和交易日历；
+- 历史行情及部分实时行情；
+- 财务报表和财务指标；
+- 分红、融资融券、资金流向等市场数据；
+- 新闻和部分宏观经济数据。
+
+使用 Tushare 通常需要申请 `Token`，不同接口还可能受到积分、权限、调用频率或付费等级限制。因此，Tushare 更准确地说是一个**金融数据接口项目及数据服务平台**，不是券商，也不是交易系统。
+
+在 TradingAgents-CN 中，Tushare 是 A 股数据源之一。项目通过 `tushare` Python 库访问 Tushare Pro API，并可同步股票基础信息、行情、历史数据、财务数据和新闻到 MongoDB。相关配置项包括：
+
+```bash
+TUSHARE_TOKEN=your_token_here
+TUSHARE_ENABLED=true
+```
+
+项目通常将 Tushare 视为专业级数据源；当 Tushare 不可用或未启用时，可以根据数据源管理配置降级到 AKShare 或 BaoStock。Tushare 的核心接入实现位于 `tradingagents/dataflows/providers/china/tushare.py`。
