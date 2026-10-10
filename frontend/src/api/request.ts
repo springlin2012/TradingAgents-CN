@@ -272,7 +272,7 @@ const createAxiosInstance = (): AxiosInstance => {
             break
 
           case 403:
-            showErrorMessage('权限不足，无法访问该资源')
+            if (!config?.skipErrorHandler) showErrorMessage('权限不足，无法访问该资源')
             break
 
           case 400:
@@ -284,21 +284,21 @@ const createAxiosInstance = (): AxiosInstance => {
             break
 
           case 404:
-            showErrorMessage('请求的资源不存在')
+            if (!config?.skipErrorHandler) showErrorMessage('请求的资源不存在')
             break
 
           case 429:
-            showErrorMessage('请求过于频繁，请稍后重试')
+            if (!config?.skipErrorHandler) showErrorMessage('请求过于频繁，请稍后重试')
             break
 
           case 500:
-            showErrorMessage('服务器内部错误，请稍后重试')
+            if (!config?.skipErrorHandler) showErrorMessage('服务器内部错误，请稍后重试')
             break
 
           case 502:
           case 503:
           case 504:
-            showErrorMessage('服务暂时不可用，请稍后重试')
+            if (!config?.skipErrorHandler) showErrorMessage('服务暂时不可用，请稍后重试')
             break
 
           default:
@@ -320,7 +320,7 @@ const createAxiosInstance = (): AxiosInstance => {
           return retryRequest(instance, config)
         }
 
-        showErrorMessage('请求超时，请检查网络连接')
+        if (!config?.skipErrorHandler) showErrorMessage('请求超时，请检查网络连接')
       } else if (error.message === 'Network Error') {
         console.error('🔍 [REQUEST] 网络连接错误:', {
           message: error.message,
@@ -334,7 +334,7 @@ const createAxiosInstance = (): AxiosInstance => {
           return retryRequest(instance, config)
         }
 
-        showErrorMessage('网络连接失败，请检查网络设置')
+        if (!config?.skipErrorHandler) showErrorMessage('网络连接失败，请检查网络设置')
       } else if (error.message.includes('Failed to fetch')) {
         console.error('🔍 [REQUEST] Fetch失败错误:', {
           message: error.message,
@@ -348,7 +348,7 @@ const createAxiosInstance = (): AxiosInstance => {
           return retryRequest(instance, config)
         }
 
-        showErrorMessage('网络请求失败，请检查服务器连接')
+        if (!config?.skipErrorHandler) showErrorMessage('网络请求失败，请检查服务器连接')
       } else if (!config?.skipErrorHandler) {
         console.error('🔍 [REQUEST] 其他错误:', {
           message: error.message,

@@ -9,6 +9,7 @@
 |---|---|---|
 | 1 | 根据股票代码查询股票名称 | 添加自选股时，A 股代码失焦后读本地库自动填名称 |
 | 2 | stock_basic_info 数据来源与同步 | A 股基础信息如何从 Tushare / AKShare / BaoStock 入库 |
+| 3 | A股名称模糊搜索与自动填充 | 输入名称片段，选择候选后同时填入名称和六位代码 |
 
 ---
 
@@ -75,6 +76,7 @@ Favorites 添加对话框（blur）
 - 这条接口不是自选股 CRUD。自选股增删改仍走 `/api/favorites`，由 `FavoritesService` 读写 `user_favorites`。
 - 详情页、筛选页加入自选时，名称来自当前页面已有字段，不会再走这条失焦查询。
 - 数据从哪里来、何时写入，见 **功能 2**。
+- 选择功能 3 的候选后跳过同代码失焦查名；手动代码须为六位数字才查询。请求返回前核对代码、名称编辑版本、市场和弹窗会话，防止旧响应覆盖后续编辑。
 
 ---
 
@@ -162,3 +164,59 @@ AKShare / BaoStock 是先拿列表，再按只拉详情，写入对应 `source`�
 - 功能 1 的失焦填名称 **只读库，不再打外部行情**。库里没有这只股票、或对应 `source` 没同步过，名称就不会自动出来。
 - 要补数据走功能 2 的同步入口，而不是功能 1 的 GET 接口。
 - 港股 / 美股基础信息不写入 `stock_basic_info`。
+
+---
+
+## 功能 3：A股名称模糊搜索与自动填充
+
+### 3.1 使用场景与调用链
+
+我的自选股 → 添加自选股 → A股股票名称输入框。港股、美股继续使用普通名称输入框。
+
+```text
+Favorites/index.vue 的 el-autocomplete
+  → useStockNameAutocomplete（300毫秒防抖）
+  → stockData.ts :: searchStockCandidates
+  → GET /api/stock-data/search?keyword=海&limit=10&mode=autocomplete
+  → stock_data.py :: search_stocks
+  → StockDataService.search_stock_candidates
+  → MongoDB.stock_basic_info（聚合匹配、选源、去重、排序）
+  → 候选列表显示名称和代码
+  → selectStock 同时写入 stock_name / stock_code
+  → 原 /api/favorites 添加流程
+```
+
+### 3.2 接口参数与响应
+
+| 参数 | 规则 |
+|---|---|
+| `mode` | `default`（默认）保留原搜索行为；`autocomplete` 搜索名称候选 |
+| `keyword` | 自动模式去除首尾空白后须为1～50字符，否则 HTTP 422 |
+| `limit` | 接口接受1～50；自动模式最多10条，前端固定传10 |
+| 鉴权 | 沿用 `get_current_user` 登录鉴权 |
+
+响应沿用 `{success, data, total, keyword, source, message}`。自动模式的 `data` 是数组，每条固定为 `{symbol, name, source}`，代码为六位字符串；顶层 `source="mixed"`，`total` 表示本次返回数量。默认模式的来源策略和响应保持兼容。
+
+### 3.3 数据规则
+
+- 只读本地 `stock_basic_info`，不调用外部行情接口，不新增集合。入库机制见功能 2。
+- 使用 `re.escape` 对名称作大小写不敏感的字面子串匹配；不支持拼音、错别字或历史名称搜索。
+- 兼容 `symbol/code`，1～6位数字代码补齐六位；无效代码与显式 HK/US 记录排除。
+- 同代码的匹配记录按 `tushare → multi_source → akshare → baostock → 其他来源` 选源；同来源按更新时间、记录标识稳定取最新，缺失来源返回 `unknown`。
+- 去重后按名称完全匹配、前缀匹配、包含匹配排序，同级按代码升序，最后限制数量。不同来源名称有差异时，以本次匹配记录为准。
+
+### 3.4 前端交互与请求保护
+
+候选与输入框等宽，显示名称和六位代码，支持鼠标、上下键、回车及 Esc。选中后清除名称和代码的校验错误，跳过同代码查名；再次修改名称清除此次自动填入的代码，手动改代码清除旧选择及自动名称。
+
+输入变化立即使旧请求失效；响应更新前核对请求版本、关键词、A股市场和弹窗会话。切换市场、关闭、重开、销毁时清除候选和计时器。代码查名也核对编辑版本与会话，避免覆盖后来输入。
+
+无结果提示“未找到匹配股票，可输入完整代码和名称”；失败提示“搜索暂时不可用，可手动填写”。搜索设置 `skipErrorHandler=true`、`retryCount=0`，字段提示不重复弹全局错误；401仍沿用登录失效处理。
+
+### 3.5 验证与相关文件
+
+- 后端：`tests/test_stock_name_candidates.py`，23项测试覆盖真实 MongoDB 聚合、来源回退、排序、特殊字符、参数和默认模式兼容。仅使用随机独立测试库并清理，不访问业务集合。完整执行需显式设置 `TEST_STOCK_CANDIDATES_MONGO_URI`；无可用测试库时部分测试跳过。
+- 前端：`node --test tests/frontend/test_stock_name_autocomplete.cjs tests/frontend/test_stock_search_request.cjs`，10项通过，覆盖防抖、乱序响应、表单联动、状态清理与静默错误/401。
+- 构建：`npm run type-check`、`npm run build`；lint 使用 `npm run lint -- --no-fix --ignore-path ../.gitignore`，避免原脚本引用不存在的前端 `.gitignore`。本地补齐缺少的 `@rushstack/eslint-patch`，未修改依赖清单和锁文件。
+- 浏览器模拟服务：`tests/frontend/stock_name_ui_fixture.cjs`，使用内存股票和自选数据验证界面，不代表真实业务环境或数据覆盖率。
+- 实施设计与验收说明：[自选股名称模糊搜索实现方案](design/自选股名称模糊搜索实现方案_20261009.md)。未测真实库 P95；中文输入法组合输入依赖组件机制，尚未完成实机输入法验收。
