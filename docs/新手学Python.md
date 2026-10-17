@@ -1,8 +1,8 @@
 # 新手学 Python
 
-本文归纳阅读 TradingAgents-CN 源码时最容易卡住的语法：`-> dict:`、`await`、`async def`、函数内部再 `def` 嵌套函数，以及 MongoDB 里相当于 SQL `LIKE` 的 `$regex` 查询。例子来自本项目的股票数据准备、分析服务和搜索接口。
+本文归纳阅读 TradingAgents-CN 源码时最容易卡住的语法：`-> dict:`、`await`、`async def`、函数内部再 `def` 嵌套函数、MongoDB 里相当于 SQL `LIKE` 的 `$regex` 查询，以及前端 `const fetchSuggestions` 这种回调式搜索函数。例子来自本项目的股票数据准备、分析服务、搜索接口和收藏页名称自动补全。
 
-读项目代码前，可先看 [新手学习路线](新手学习路线.md)。读到 `app/services/simple_analysis_service.py`、`tradingagents/utils/stock_validator.py`、`app/routers/stock_data.py` 或 `app/routers/reports.py` 时，可回到本文对照。
+读项目代码前，可先看 [新手学习路线](新手学习路线.md)。读到 `app/services/simple_analysis_service.py`、`tradingagents/utils/stock_validator.py`、`app/routers/stock_data.py`、`app/routers/reports.py` 或 `frontend/src/composables/useStockNameAutocomplete.ts` 时，可回到本文对照。
 
 ## 一、`-> dict:` 是返回类型注解
 
@@ -298,3 +298,86 @@ Mongo:   { "$or": [
 2. **前缀 `^xxx` 才容易走索引。** 中间包含（`%xxx%`）基本是扫描，数据量大时会慢。
 3. **精确匹配不要用正则。** 6 位股票代码用 `{"symbol": keyword}` 就够了，项目里也是这样分的。
 4. **这是查询文档，不是 Python 运算符。** 它出现在 `collection.find(query)` 的 `query` 字典里，由 MongoDB 服务端执行。
+
+## 七、`const fetchSuggestions`：内部函数 + 回调填下拉
+
+读到 `useStockNameAutocomplete()` 时，会看到函数里面又定义了 `const fetchSuggestions = (...) => { ... }`。这不是 Python，而是前端 TypeScript，但读法和第五节的嵌套函数很像：**外层组合式函数里，再定义一个只服务这次自动补全的内部函数。**
+
+```ts
+// frontend/src/composables/useStockNameAutocomplete.ts
+export function useStockNameAutocomplete(...) {
+  const fetchSuggestions = (
+    query: string,
+    callback: (stocks: StockNameCandidate[]) => void
+  ) => {
+    const keyword = query.trim()
+    // 组件的延迟回调也需核对当前表单，关闭后不再发起请求。
+    if (!visible.value || form.value.market !== 'A股' || keyword !== form.value.stock_name.trim()) {
+      return
+    }
+    ...
+    timer = setTimeout(async () => {
+      const stocks = await searchStockCandidates(keyword, 10)
+      if (!isCurrent()) return
+      callback(stocks)
+    }, 300)
+  }
+
+  return { loading, hint, fetchSuggestions, ... }
+}
+```
+
+收藏页把它交给 Element Plus 的自动补全组件：
+
+```vue
+<el-autocomplete :fetch-suggestions="stockNameSearch.fetchSuggestions" />
+```
+
+用户每改一次股票名称，组件就会调用这个函数。
+
+### 语法上它是什么
+
+| 写法 | 含义 |
+| --- | --- |
+| `const fetchSuggestions = ...` | 把函数赋给常量，后面可以 `return` 出去给组件用 |
+| `(query, callback) => { ... }` | 箭头函数，相当于 Python 的 `def fetch_suggestions(query, callback):` |
+| 写在 `useStockNameAutocomplete()` 里面 | 嵌套函数 / 闭包，能直接用外层的 `form`、`visible`、`selected` |
+
+和 Python 第五节对照：那边用内部 `def create_progress_tracker()` 包住同步逻辑；这边用内部 `const fetchSuggestions` 包住“按当前输入去搜候选股”。
+
+### 两个参数
+
+| 参数 | 含义 |
+| --- | --- |
+| `query` | 当前输入框里的文字，比如「海尔」 |
+| `callback` | 组件给的回调。搜完后必须 `callback(候选列表)`，下拉框才会显示 |
+
+它**不 return 列表**。`el-autocomplete` 的约定就是异步搜完再调 `callback`。可以把它想成：组件说“你去搜，搜完喊我一声”。
+
+### 函数实际做的事
+
+1. **先拦截无效请求：** 弹窗关了、不是 A 股、输入已经变了，直接 return。
+2. **空串、超过 50 字、已经选中同一只：** `callback([])`，不发请求。
+3. **防抖 300ms：** 停手后再搜，避免每个字都打后端。
+4. **`searchStockCandidates(keyword, 10)`：** 最多搜 10 只候选。后端股票搜索用的就是第六节的 `$regex`。
+5. **`isCurrent()` 防过期：** 用户已经改字、关弹窗、换市场了，旧结果丢掉，避免覆盖新输入。
+6. **成功就 `callback(stocks)`**，失败或没结果就 `callback([])`，并更新 `hint`。
+
+```text
+用户输入股票名
+  -> el-autocomplete 调用 fetchSuggestions(query, callback)
+  -> 检查弹窗 / 市场 / 字数
+  -> 等 300ms 防抖
+  -> searchStockCandidates() 打后端
+  -> isCurrent() 确认输入还没变
+  -> callback(候选列表) 填进下拉框
+```
+
+可以记一句：**`fetchSuggestions` 是名称自动补全的搜索函数：根据用户刚输入的名字去后端找候选股，再通过 `callback` 填进下拉框。**
+
+看到前端组合式函数里 `const xxx = (query, callback) => { ... }`，先问两句：
+
+1. 它是不是马上被组件的 `:fetch-suggestions` / 事件回调拿走？
+2. 它有没有直接使用外层的 `form`、`visible`、`selected`？
+
+两句都是，就是闭包，不是“把函数赋给变量写乱了”。
