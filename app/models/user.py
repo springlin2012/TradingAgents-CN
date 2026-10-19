@@ -76,6 +76,9 @@ class User(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     email: str = Field(..., pattern=r'^[^@]+@[^@]+\.[^@]+$')
     hashed_password: str
+    phone: Optional[str] = None
+    wechat_openid: Optional[str] = None
+    wechat_unionid: Optional[str] = None
     is_active: bool = True
     is_verified: bool = False
     is_admin: bool = False

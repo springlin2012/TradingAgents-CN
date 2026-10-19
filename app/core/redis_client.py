@@ -90,6 +90,8 @@ class RedisKeys:
     USER_SESSION = "session:{session_id}"
     USER_RATE_LIMIT = "rate_limit:{user_id}:{endpoint}"
     USER_DAILY_QUOTA = "quota:{user_id}:{date}"
+    SMS_LOGIN_CODE = "sms:login:{phone}"
+    SMS_SEND_LIMIT = "sms:limit:{phone}"
     
     # 系统相关
     QUEUE_STATS = "queue:stats"

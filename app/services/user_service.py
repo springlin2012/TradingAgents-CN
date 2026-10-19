@@ -3,11 +3,13 @@
 """
 
 import hashlib
+import secrets
 import time
 import bcrypt
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pymongo import MongoClient
+from pymongo.errors import DuplicateKeyError
 from bson import ObjectId
 
 from app.core.config import settings
@@ -32,6 +34,61 @@ class UserService:
         self.client = MongoClient(settings.MONGO_URI)
         self.db = self.client[settings.MONGO_DB]
         self.users_collection = self.db.users
+        self._ensure_identity_indexes()
+
+    def _ensure_identity_indexes(self):
+        """手机号 / 微信身份字段使用稀疏唯一索引，兼容存量用户。"""
+        try:
+            self.users_collection.create_index("phone", unique=True, sparse=True)
+            self.users_collection.create_index("wechat_openid", unique=True, sparse=True)
+            self.users_collection.create_index("wechat_unionid", unique=True, sparse=True)
+        except Exception as exc:
+            logger.warning(f"创建用户身份索引失败（可忽略）: {exc}")
+
+    @staticmethod
+    def _default_preferences() -> Dict[str, Any]:
+        return {
+            "default_market": "A股",
+            "default_depth": "3",
+            "default_analysts": ["市场分析师", "基本面分析师"],
+            "auto_refresh": True,
+            "refresh_interval": 30,
+            "ui_theme": "light",
+            "sidebar_width": 240,
+            "language": "zh-CN",
+            "notifications_enabled": True,
+            "email_notifications": False,
+            "desktop_notifications": True,
+            "analysis_complete_notification": True,
+            "system_maintenance_notification": True,
+        }
+
+    def _new_user_doc(self, **fields) -> Dict[str, Any]:
+        now = datetime.utcnow()
+        doc = {
+            "hashed_password": self.hash_password(secrets.token_urlsafe(24)),
+            "is_active": True,
+            "is_verified": False,
+            "is_admin": False,
+            "created_at": now,
+            "updated_at": now,
+            "last_login": now,
+            "preferences": self._default_preferences(),
+            "daily_quota": 1000,
+            "concurrent_limit": 3,
+            "total_analyses": 0,
+            "successful_analyses": 0,
+            "failed_analyses": 0,
+            "favorite_stocks": [],
+        }
+        doc.update(fields)
+        return doc
+
+    def _touch_last_login(self, user_id) -> None:
+        self.users_collection.update_one(
+            {"_id": user_id},
+            {"$set": {"last_login": datetime.utcnow()}},
+        )
 
     def close(self):
         """关闭数据库连接"""
@@ -125,8 +182,14 @@ class UserService:
         try:
             logger.info(f"🔍 [authenticate_user] 开始认证用户: {username}")
 
-            # 查找用户
-            user_doc = self.users_collection.find_one({"username": username})
+            # 查找用户：兼容用户名 / 邮箱 / 手机号
+            user_doc = self.users_collection.find_one({
+                "$or": [
+                    {"username": username},
+                    {"email": username},
+                    {"phone": username},
+                ]
+            })
             logger.info(f"🔍 [authenticate_user] 数据库查询结果: {'找到用户' if user_doc else '用户不存在'}")
 
             if not user_doc:
@@ -174,6 +237,93 @@ class UserService:
             
         except Exception as e:
             logger.error(f"❌ 用户认证失败: {e}")
+            return None
+
+    async def get_user_by_phone(self, phone: str) -> Optional[User]:
+        try:
+            user_doc = self.users_collection.find_one({"phone": phone})
+            return User(**user_doc) if user_doc else None
+        except Exception as e:
+            logger.error(f"❌ 按手机号获取用户失败: {e}")
+            return None
+
+    async def get_user_by_wechat(self, openid: str, unionid: Optional[str] = None) -> Optional[User]:
+        try:
+            query = [{"wechat_openid": openid}]
+            if unionid:
+                query.append({"wechat_unionid": unionid})
+            user_doc = self.users_collection.find_one({"$or": query})
+            return User(**user_doc) if user_doc else None
+        except Exception as e:
+            logger.error(f"❌ 按微信身份获取用户失败: {e}")
+            return None
+
+    async def get_or_create_phone_user(self, phone: str) -> Optional[User]:
+        """手机号验证码登录：已有账号直接登录，否则自动注册。"""
+        existing = await self.get_user_by_phone(phone)
+        if existing:
+            if not existing.is_active:
+                logger.warning(f"❌ 手机号用户已禁用: {phone}")
+                return None
+            self._touch_last_login(existing.id)
+            return existing
+
+        username = f"p{phone}"
+        user_doc = self._new_user_doc(
+            username=username,
+            email=f"{phone}@phone.local",
+            phone=phone,
+            is_verified=True,
+        )
+        try:
+            result = self.users_collection.insert_one(user_doc)
+            user_doc["_id"] = result.inserted_id
+            logger.info(f"✅ 手机号用户自动注册: {phone}")
+            return User(**user_doc)
+        except DuplicateKeyError:
+            existing = await self.get_user_by_phone(phone)
+            if existing:
+                self._touch_last_login(existing.id)
+            return existing
+        except Exception as e:
+            logger.error(f"❌ 创建手机号用户失败: {e}")
+            return None
+
+    async def get_or_create_wechat_user(self, openid: str, unionid: Optional[str] = None) -> Optional[User]:
+        """微信登录：已有 openid/unionid 则登录，否则自动注册。"""
+        existing = await self.get_user_by_wechat(openid, unionid)
+        if existing:
+            if not existing.is_active:
+                logger.warning(f"❌ 微信用户已禁用: {openid[:8]}...")
+                return None
+            updates = {"last_login": datetime.utcnow()}
+            if unionid and not existing.wechat_unionid:
+                updates["wechat_unionid"] = unionid
+            if not existing.wechat_openid:
+                updates["wechat_openid"] = openid
+            self.users_collection.update_one({"_id": existing.id}, {"$set": updates})
+            return await self.get_user_by_username(existing.username)
+
+        username = f"wx_{openid}"[:50]
+        user_doc = self._new_user_doc(
+            username=username,
+            email=f"{openid}@wechat.local",
+            wechat_openid=openid,
+            wechat_unionid=unionid,
+            is_verified=True,
+        )
+        try:
+            result = self.users_collection.insert_one(user_doc)
+            user_doc["_id"] = result.inserted_id
+            logger.info("✅ 微信用户自动注册")
+            return User(**user_doc)
+        except DuplicateKeyError:
+            existing = await self.get_user_by_wechat(openid, unionid)
+            if existing:
+                self._touch_last_login(existing.id)
+            return existing
+        except Exception as e:
+            logger.error(f"❌ 创建微信用户失败: {e}")
             return None
     
     async def get_user_by_username(self, username: str) -> Optional[User]:

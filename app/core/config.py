@@ -125,6 +125,15 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=60)
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=30)
 
+    # 微信小程序登录（wx.login code 换 openid，密钥只放服务端）
+    WECHAT_MINI_APPID: str = Field(default="")
+    WECHAT_MINI_SECRET: str = Field(default="")
+
+    # 短信验证码登录（未对接真实短信通道时，DEBUG 下使用固定验证码）
+    SMS_CODE_TTL_SECONDS: int = Field(default=300)
+    SMS_SEND_INTERVAL_SECONDS: int = Field(default=60)
+    SMS_DEBUG_CODE: str = Field(default="")
+
     # 队列配置
     QUEUE_MAX_SIZE: int = Field(default=10000)
     QUEUE_VISIBILITY_TIMEOUT: int = Field(default=300)  # 5分钟

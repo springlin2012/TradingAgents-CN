@@ -7,13 +7,15 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.services.auth_service import AuthService
 from app.services.user_service import user_service
 from app.models.user import UserCreate, UserUpdate
 from app.services.operation_log_service import log_operation
 from app.models.operation_log import ActionType
+from app.services.sms_service import SmsService
+from app.services.wechat_auth_service import WeChatAuthService
 
 # 尝试导入日志管理器
 try:
@@ -35,8 +37,17 @@ class ApiResponse(BaseModel):
 router = APIRouter()
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    login_type: str = Field(default="password", description="password | phone | wechat")
+    username: Optional[str] = None
+    password: Optional[str] = None
+    phone: Optional[str] = None
+    sms_code: Optional[str] = None
+    code: Optional[str] = None
+    appid: Optional[str] = None
+
+
+class SendSmsRequest(BaseModel):
+    phone: str
 
 class LoginResponse(BaseModel):
     access_token: str
@@ -110,110 +121,120 @@ async def get_current_user(authorization: Optional[str] = Header(default=None)) 
         "name": user.username,
         "is_admin": user.is_admin,
         "roles": ["admin"] if user.is_admin else ["user"],
-        "preferences": user.preferences.model_dump() if user.preferences else {}
+        "preferences": user.preferences.model_dump() if user.preferences else {},
+        "phone": getattr(user, "phone", None),
     }
+
+
+def _public_user(user) -> dict:
+    return {
+        "id": str(user.id),
+        "username": user.username,
+        "email": user.email,
+        "name": user.username,
+        "is_admin": user.is_admin,
+        "phone": getattr(user, "phone", None),
+    }
+
+
+def _issue_login_payload(user) -> dict:
+    token = AuthService.create_access_token(sub=user.username)
+    refresh_token = AuthService.create_access_token(sub=user.username, expires_delta=60 * 60 * 24 * 7)
+    return {
+        "access_token": token,
+        "refresh_token": refresh_token,
+        "expires_in": 60 * 60,
+        "user": _public_user(user),
+    }
+
+
+async def _record_login_failure(username: str, reason: str, start_time: float, ip_address: str, user_agent: str):
+    await log_operation(
+        user_id="unknown",
+        username=username or "unknown",
+        action_type=ActionType.USER_LOGIN,
+        action="用户登录",
+        details={"reason": reason},
+        success=False,
+        error_message=reason,
+        duration_ms=int((time.time() - start_time) * 1000),
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+
+@router.post("/sms-code")
+async def send_sms_code(payload: SendSmsRequest):
+    """发送手机号登录验证码"""
+    data = await SmsService.send_login_code(payload.phone)
+    return {
+        "success": True,
+        "data": data,
+        "message": "验证码已发送",
+    }
+
 
 @router.post("/login")
 async def login(payload: LoginRequest, request: Request):
-    """用户登录"""
+    """用户登录：password / phone / wechat"""
     start_time = time.time()
-
-    # 获取客户端信息
+    login_type = (payload.login_type or "password").strip().lower()
     ip_address = request.client.host if request.client else "unknown"
     user_agent = request.headers.get("user-agent", "")
+    actor = payload.username or payload.phone or "unknown"
 
-    logger.info(f"🔐 登录请求 - 用户名: {payload.username}, IP: {ip_address}")
+    logger.info(f"🔐 登录请求 - type: {login_type}, actor: {actor}, IP: {ip_address}")
 
     try:
-        # 验证输入
-        if not payload.username or not payload.password:
-            logger.warning(f"❌ 登录失败 - 用户名或密码为空")
-            await log_operation(
-                user_id="unknown",
-                username=payload.username or "unknown",
-                action_type=ActionType.USER_LOGIN,
-                action="用户登录",
-                details={"reason": "用户名和密码不能为空"},
-                success=False,
-                error_message="用户名和密码不能为空",
-                duration_ms=int((time.time() - start_time) * 1000),
-                ip_address=ip_address,
-                user_agent=user_agent
-            )
-            raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+        user = None
+        if login_type == "password":
+            if not payload.username or not payload.password:
+                await _record_login_failure(actor, "用户名和密码不能为空", start_time, ip_address, user_agent)
+                raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+            user = await user_service.authenticate_user(payload.username, payload.password)
+            if not user:
+                await _record_login_failure(payload.username, "用户名或密码错误", start_time, ip_address, user_agent)
+                raise HTTPException(status_code=401, detail="用户名或密码错误")
+        elif login_type == "phone":
+            if not payload.phone or not payload.sms_code:
+                await _record_login_failure(actor, "手机号和验证码不能为空", start_time, ip_address, user_agent)
+                raise HTTPException(status_code=400, detail="手机号和验证码不能为空")
+            phone = await SmsService.verify_login_code(payload.phone, payload.sms_code)
+            user = await user_service.get_or_create_phone_user(phone)
+            if not user:
+                await _record_login_failure(phone, "手机号登录失败", start_time, ip_address, user_agent)
+                raise HTTPException(status_code=401, detail="手机号登录失败")
+        elif login_type == "wechat":
+            wechat = await WeChatAuthService.exchange_code(payload.code or "", payload.appid)
+            user = await user_service.get_or_create_wechat_user(wechat["openid"], wechat.get("unionid"))
+            if not user:
+                await _record_login_failure("wechat", "微信登录失败", start_time, ip_address, user_agent)
+                raise HTTPException(status_code=401, detail="微信登录失败")
+        else:
+            raise HTTPException(status_code=400, detail="不支持的登录方式")
 
-        logger.info(f"🔍 开始认证用户: {payload.username}")
-
-        # 使用数据库认证
-        user = await user_service.authenticate_user(payload.username, payload.password)
-
-        logger.info(f"🔍 认证结果: user={'存在' if user else '不存在'}")
-
-        if not user:
-            logger.warning(f"❌ 登录失败 - 用户名或密码错误: {payload.username}")
-            await log_operation(
-                user_id="unknown",
-                username=payload.username,
-                action_type=ActionType.USER_LOGIN,
-                action="用户登录",
-                details={"reason": "用户名或密码错误"},
-                success=False,
-                error_message="用户名或密码错误",
-                duration_ms=int((time.time() - start_time) * 1000),
-                ip_address=ip_address,
-                user_agent=user_agent
-            )
-            raise HTTPException(status_code=401, detail="用户名或密码错误")
-
-        # 生成 token
-        token = AuthService.create_access_token(sub=user.username)
-        refresh_token = AuthService.create_access_token(sub=user.username, expires_delta=60*60*24*7)  # 7天有效期
-
-        # 记录登录成功日志
         await log_operation(
             user_id=str(user.id),
             username=user.username,
             action_type=ActionType.USER_LOGIN,
             action="用户登录",
-            details={"login_method": "password"},
+            details={"login_method": login_type},
             success=True,
             duration_ms=int((time.time() - start_time) * 1000),
             ip_address=ip_address,
-            user_agent=user_agent
+            user_agent=user_agent,
         )
 
         return {
             "success": True,
-            "data": {
-                "access_token": token,
-                "refresh_token": refresh_token,
-                "expires_in": 60 * 60,
-                "user": {
-                    "id": str(user.id),
-                    "username": user.username,
-                    "email": user.email,
-                    "name": user.username,
-                    "is_admin": user.is_admin
-                }
-            },
-            "message": "登录成功"
+            "data": _issue_login_payload(user),
+            "message": "登录成功",
         }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"❌ 登录异常: {e}")
-        await log_operation(
-            user_id="unknown",
-            username=payload.username or "unknown",
-            action_type=ActionType.USER_LOGIN,
-            action="用户登录",
-            details={"error": str(e)},
-            success=False,
-            error_message=f"系统错误: {str(e)}",
-            duration_ms=int((time.time() - start_time) * 1000),
-            ip_address=ip_address,
-            user_agent=user_agent
-        )
+        await _record_login_failure(actor, f"系统错误: {str(e)}", start_time, ip_address, user_agent)
         raise HTTPException(status_code=500, detail="登录过程中发生系统错误")
 
 @router.post("/refresh")
