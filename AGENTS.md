@@ -52,3 +52,4 @@ Never commit secrets. Copy `.env.example` to `.env` for local keys and service s
 
 - 新建文档统一写入当前项目 `docs/` 下按类型划分的子目录：需求 `prd/`、设计 `design/`、分析 `analysis/`、配置 `config/`、规范 `standards/` 、模版 `template/` 等；未列出的类型按同样模式新建语义化子目录，不要堆在 `docs/` 根下。
 - 文件命名用格式：`文件名称_yyyyMMdd` 如：`TEST_20220301.md`。
+- 新增文档时需要更新 `项目知识库索引.md`。

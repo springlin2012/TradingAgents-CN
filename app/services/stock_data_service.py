@@ -3,6 +3,7 @@
 基于现有MongoDB集合，提供标准化的数据访问服务
 """
 import logging
+import re
 from datetime import datetime, date
 from typing import Optional, Dict, Any, List
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -29,7 +30,89 @@ class StockDataService:
     def __init__(self):
         self.basic_info_collection = "stock_basic_info"
         self.market_quotes_collection = "market_quotes"
-    
+
+    async def search_stock_candidates(
+        self, keyword: str, limit: int = 10
+    ) -> List[Dict[str, str]]:
+        """按名称字面子串查找 A 股候选，由 MongoDB 完成选源、去重和排序。"""
+        keyword = keyword.strip()
+        if not keyword or len(keyword) > 50:
+            raise ValueError("名称搜索关键词须为1至50个字符")
+        limit = max(1, min(limit, 10))
+        escaped = re.escape(keyword)
+        source_priority = ["tushare", "multi_source", "akshare", "baostock"]
+
+        pipeline = [
+            {"$match": {
+                "name": {"$type": "string", "$regex": escaped, "$options": "i"},
+                "market": {"$nin": ["HK", "US"]},
+                "market_info.market": {"$nin": ["HK", "US"]},
+            }},
+            {"$set": {
+                "_candidate_code": {"$trim": {"input": {"$convert": {
+                    "input": {"$cond": [
+                        {"$in": [{"$ifNull": ["$symbol", ""]}, ["", None]]},
+                        "$code", "$symbol",
+                    ]},
+                    "to": "string", "onError": "", "onNull": "",
+                }}}},
+                "_candidate_source": {"$convert": {
+                    "input": "$source", "to": "string",
+                    "onError": "unknown", "onNull": "unknown",
+                }},
+                # 历史记录同时使用 BSON 日期和 ISO 字符串，统一后再选最新记录。
+                "_candidate_updated_at": {"$convert": {
+                    "input": "$updated_at", "to": "date",
+                    "onError": None, "onNull": None,
+                }},
+            }},
+            {"$match": {"_candidate_code": {"$regex": r"^[0-9]{1,6}$"}}},
+            {"$set": {
+                "_candidate_symbol": {"$substrCP": [
+                    {"$concat": ["000000", "$_candidate_code"]},
+                    {"$strLenCP": "$_candidate_code"}, 6,
+                ]},
+                "_candidate_source": {"$cond": [
+                    {"$eq": ["$_candidate_source", ""]}, "unknown", "$_candidate_source",
+                ]},
+                "_source_priority": {"$switch": {
+                    "branches": [
+                        {"case": {"$eq": ["$_candidate_source", source]}, "then": rank}
+                        for rank, source in enumerate(source_priority)
+                    ],
+                    "default": len(source_priority),
+                }},
+            }},
+            {"$sort": {
+                "_candidate_symbol": 1, "_source_priority": 1,
+                "_candidate_updated_at": -1, "_id": -1,
+            }},
+            {"$group": {
+                "_id": "$_candidate_symbol", "candidate": {"$first": "$$ROOT"},
+            }},
+            {"$replaceRoot": {"newRoot": "$candidate"}},
+            {"$set": {"_match_priority": {"$switch": {
+                "branches": [
+                    {"case": {"$regexMatch": {
+                        "input": "$name", "regex": f"^{escaped}$", "options": "i",
+                    }}, "then": 0},
+                    {"case": {"$regexMatch": {
+                        "input": "$name", "regex": f"^{escaped}", "options": "i",
+                    }}, "then": 1},
+                ],
+                "default": 2,
+            }}}},
+            {"$sort": {"_match_priority": 1, "_candidate_symbol": 1}},
+            {"$limit": limit},
+            {"$project": {
+                "_id": 0, "symbol": "$_candidate_symbol", "name": 1,
+                "source": "$_candidate_source",
+            }},
+        ]
+        db = get_mongo_db()
+        cursor = db[self.basic_info_collection].aggregate(pipeline)
+        return await cursor.to_list(length=limit)
+
     async def get_stock_basic_info(
         self,
         symbol: str,

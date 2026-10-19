@@ -1,6 +1,6 @@
 # TradingAgents 百问百答
 
-> 更新日期：2026-09-29
+> 更新日期：2026-10-09
 
 ## 1. 项目中的 AKShare 数据源是什么？
 
@@ -204,3 +204,137 @@ TUSHARE_ENABLED=true
 - 多头和空头结论不同：重点看最终决策是否说明了分歧，以及交易计划是否设置了明确的确认条件和止损条件。
 
 报告结论仅供研究参考，不构成投资建议。最终决策前应核对报告日期、行情数据时效性、适用时间周期和判断失效条件。
+
+报告栏目里的“投资组合经理”，对应的是图节点 `Risk Judge`（风险经理），不是独立的投资组合经理智能体。一次分析实际上场的角色见第 6 问。
+
+## 6. 执行一次股票分析会有哪些角色？
+
+一次股票分析里真正上场的角色，以 `tradingagents/graph/setup.py` 装配的 LangGraph 节点为准，分成四段。默认全选分析师时是 **11 个智能体**；如果用户少选分析师，最少是 **1 个分析师 + 后面固定 8 人 = 9 人**。
+
+默认分析师列表来自 `app/models/analysis.py`：
+
+```python
+selected_analysts: List[str] = Field(
+    default_factory=lambda: ["market", "fundamentals", "news", "social"]
+)
+```
+
+### 四阶段总览
+
+后三段固定上场；分析师由 `selected_analysts` 决定，按选择顺序**串行**执行，不是并行。
+
+```mermaid
+flowchart LR
+  A["分析师团队<br/>可选 1 到 4 人"] --> B["研究辩论<br/>看涨 / 看跌 / 研究经理"]
+  B --> C["交易员<br/>给出买卖建议"]
+  C --> D["风险管理<br/>三方辩论加裁决"]
+```
+
+### 完整节点顺序
+
+下图对应 `GraphSetup.setup_graph()` 的实际边。分析师跑完会进入 `Msg Clear` 清消息，再交给下一位；最后一位分析师交给看涨研究员。研究辩论和风险辩论的轮次分别由 `max_debate_rounds`、`max_risk_discuss_rounds` 控制。
+
+```mermaid
+flowchart TD
+  START["START"] --> A1["当前分析师<br/>Market / Fundamentals / News / Social"]
+  A1 -->|有 tool_calls| TOOLS["tools_当前分析师"]
+  TOOLS --> A1
+  A1 -->|无 tool_calls 或达到上限| CLEAR["Msg Clear 当前分析师"]
+  CLEAR --> NEXT{"还有下一个分析师？"}
+  NEXT -- 是 --> A1
+  NEXT -- 否 --> BULL["看涨研究员<br/>Bull Researcher"]
+  BULL --> DEBATE{"辩论次数达到上限？"}
+  DEBATE -- 否 --> BEAR["看跌研究员<br/>Bear Researcher"]
+  BEAR --> DEBATE
+  DEBATE -- 是 --> RM["研究经理<br/>Research Manager"]
+  RM --> TRADER["交易员<br/>Trader"]
+  TRADER --> RISKY["激进风险分析师<br/>Risky Analyst"]
+  RISKY --> RISK{"风险讨论次数达到上限？"}
+  RISK -- 否 --> SAFE["保守风险分析师<br/>Safe Analyst"]
+  SAFE --> RISK
+  RISK -- 否 --> NEUTRAL["中性风险分析师<br/>Neutral Analyst"]
+  NEUTRAL --> RISK
+  RISK -- 是 --> RJ["风险经理<br/>Risk Judge"]
+  RJ --> ENDG["END"]
+```
+
+### 1. 分析师团队（可选，1 到 4 人）
+
+默认顺序是市场 → 基本面 → 新闻 → 社媒。每个人用 `quick_thinking_llm`，并各自绑定工具节点。
+
+| 角色 | 图节点 | 干什么 |
+| --- | --- | --- |
+| 市场分析师 | `Market Analyst` | 行情、技术指标、趋势 |
+| 基本面分析师 | `Fundamentals Analyst` | 财务、估值、公司质地 |
+| 新闻分析师 | `News Analyst` | 新闻、政策、宏观事件 |
+| 社交媒体分析师 | `Social Analyst` | 舆论和投资者情绪 |
+
+```mermaid
+flowchart LR
+  M["市场分析师"] --> F["基本面分析师"]
+  F --> N["新闻分析师"]
+  N --> S["社媒分析师"]
+  S --> BULL2["看涨研究员"]
+```
+
+用户少选几个，后面的研究、交易、风险环节照样会跑。
+
+### 2. 研究辩论（固定 3 人）
+
+分析师报告齐了之后，看涨和看跌来回辩，够轮次后交给研究经理。看涨、看跌用 `quick_thinking_llm`；研究经理用 `deep_thinking_llm`。
+
+| 角色 | 图节点 | 干什么 |
+| --- | --- | --- |
+| 看涨研究员 | `Bull Researcher` | 找机会，反驳看空 |
+| 看跌研究员 | `Bear Researcher` | 找风险，反驳看多 |
+| 研究经理 | `Research Manager` | 当辩论主持，给出买入、卖出或持有，以及投资计划 |
+
+```mermaid
+flowchart TD
+  BULL3["看涨研究员"] -->|未达轮次上限| BEAR3["看跌研究员"]
+  BEAR3 -->|未达轮次上限| BULL3
+  BULL3 -->|达到上限| RM3["研究经理"]
+  BEAR3 -->|达到上限| RM3
+  RM3 --> TRADER3["交易员"]
+```
+
+### 3. 交易员（固定 1 人）
+
+| 角色 | 图节点 | 干什么 |
+| --- | --- | --- |
+| 交易员 | `Trader` | 把研究经理的投资计划落成具体买卖建议、目标价、置信度 |
+
+交易员使用 `quick_thinking_llm`。
+
+### 4. 风险管理（固定 4 人）
+
+交易员出建议后，按激进 → 保守 → 中性轮流辩，够轮次后由风险经理收口。前三位用 `quick_thinking_llm`；风险经理用 `deep_thinking_llm`。
+
+| 角色 | 图节点 | 干什么 |
+| --- | --- | --- |
+| 激进风险分析师 | `Risky Analyst` | 偏向进取仓位 |
+| 保守风险分析师 | `Safe Analyst` | 强调下行风险 |
+| 中性风险分析师 | `Neutral Analyst` | 平衡两边 |
+| 风险经理 | `Risk Judge` | 最终交易决策，图到此结束 |
+
+```mermaid
+flowchart LR
+  R["激进风险分析师"] --> S2["保守风险分析师"]
+  S2 --> N2["中性风险分析师"]
+  N2 -->|未达轮次上限| R
+  N2 -->|达到上限| J["风险经理"]
+```
+
+前端报告栏目里的“投资组合经理”，展示的就是这位 `Risk Judge` 的裁决，不是另有一个投资组合经理节点。
+
+### 容易混的两点
+
+- **信号处理**（`SignalProcessor.process_signal()`）不是角色，只是把风险经理的最终文本抽成结构化 `decision`。
+- 仓库里还有 `tradingagents/agents/analysts/china_market_analyst.py`，旧文档也写过投资组合经理，但**当前图没有挂这两个节点**，一次分析不会跑到他们。
+
+相关源码位置：
+
+- `tradingagents/graph/setup.py`：分析师、研究员、交易员、风险节点和边；
+- `tradingagents/graph/trading_graph.py`：创建图并执行 `propagate()`；
+- `app/models/analysis.py`：默认 `selected_analysts`；
+- `docs/股票分析任务执行流程.md`：一次分析的完整调用链路。

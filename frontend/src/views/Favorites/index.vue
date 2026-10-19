@@ -237,21 +237,51 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item label="股票名称" prop="stock_name">
+          <el-autocomplete
+            v-if="addForm.market === 'A股'"
+            ref="stockNameInputRef"
+            v-model="addForm.stock_name"
+            :fetch-suggestions="stockNameSearch.fetchSuggestions"
+            :debounce="0"
+            :trigger-on-focus="false"
+            :hide-loading="true"
+            :fit-input-width="true"
+            value-key="name"
+            placeholder="输入股票名称搜索，如：海尔、平安"
+            clearable
+            class="stock-name-input"
+            popper-class="stock-name-suggestions"
+            @input="stockNameSearch.onNameInput"
+            @clear="stockNameSearch.onNameInput('')"
+            @compositionstart="stockNameSearch.invalidateInput"
+            @select="handleStockNameSelect"
+          >
+            <template #default="{ item }">
+              <div class="stock-name-candidate">
+                <span>{{ item.name }}</span>
+                <span class="stock-name-code">{{ item.symbol }}</span>
+              </div>
+            </template>
+          </el-autocomplete>
+          <el-input v-else v-model="addForm.stock_name" placeholder="股票名称" />
+          <div v-if="addForm.market === 'A股' && stockNameHint" class="stock-name-hint" role="status">
+            {{ stockNameHint }}
+          </div>
+          <div v-if="addForm.market !== 'A股'" style="font-size: 12px; color: #E6A23C; margin-top: 4px;">
+            {{ addForm.market }}不支持自动获取，请手动输入股票名称
+          </div>
+        </el-form-item>
+
         <el-form-item label="股票代码" prop="stock_code">
           <el-input
             v-model="addForm.stock_code"
             :placeholder="getStockCodePlaceholder()"
+            @input="stockNameSearch.onCodeInput"
             @blur="fetchStockInfo"
           />
           <div style="font-size: 12px; color: #909399; margin-top: 4px;">
             {{ getStockCodeHint() }}
-          </div>
-        </el-form-item>
-
-        <el-form-item label="股票名称" prop="stock_name">
-          <el-input v-model="addForm.stock_name" placeholder="股票名称" />
-          <div v-if="addForm.market !== 'A股'" style="font-size: 12px; color: #E6A23C; margin-top: 4px;">
-            {{ addForm.market }}不支持自动获取，请手动输入股票名称
           </div>
         </el-form-item>
 
@@ -514,6 +544,9 @@ import { tagsApi } from '@/api/tags'
 import { stockSyncApi } from '@/api/stockSync'
 import { normalizeMarketForAnalysis } from '@/utils/market'
 import { ApiClient } from '@/api/request'
+import { useStockNameAutocomplete } from '@/composables/useStockNameAutocomplete'
+import type { StockNameCandidate } from '@/api/stockData'
+import type { AutocompleteInstance } from 'element-plus'
 
 import type { FavoriteItem } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
@@ -578,6 +611,24 @@ const addForm = ref({
   tags: [],
   notes: ''
 })
+
+const stockNameInputRef = ref<AutocompleteInstance>()
+const stockNameSearch = useStockNameAutocomplete(addForm, addDialogVisible, () => {
+  if (stockNameInputRef.value) {
+    stockNameInputRef.value.suggestions = []
+    stockNameInputRef.value.loading = false
+  }
+})
+const stockNameHint = stockNameSearch.hint
+
+const handleStockNameSelect = (item: Record<string, unknown>) => {
+  if (typeof item.symbol !== 'string' || typeof item.name !== 'string' ||
+    typeof item.source !== 'string') return
+  const stock: StockNameCandidate = { symbol: item.symbol, name: item.name, source: item.source }
+  stockNameSearch.selectStock(stock)
+  stockNameInputRef.value?.close()
+  addFormRef.value?.clearValidate(['stock_code', 'stock_name'])
+}
 
 // 股票代码验证器
 const validateStockCode = (_rule: any, value: any, callback: any) => {
@@ -904,30 +955,25 @@ const getStockCodeHint = () => {
 }
 
 const fetchStockInfo = async () => {
-  if (!addForm.value.stock_code) return
+  const lookup = stockNameSearch.beginCodeLookup()
+  if (!lookup) return
 
   try {
-    const symbol = addForm.value.stock_code.trim()
-    const market = addForm.value.market
-
-    // 🔥 只有A股支持自动获取股票名称
-    if (market === 'A股') {
-      // 从后台获取股票基础信息
-      const res = await ApiClient.get(`/api/stock-data/basic-info/${symbol}`)
-
-      if ((res as any)?.success && (res as any)?.data) {
-        const stockInfo = (res as any).data
-        // 自动填充股票名称
-        if (stockInfo.name) {
-          addForm.value.stock_name = stockInfo.name
-          ElMessage.success(`已自动填充股票名称: ${stockInfo.name}`)
-        }
-      } else {
-        ElMessage.warning('未找到该股票信息，请手动输入股票名称')
-      }
+    const res = await ApiClient.get<{ name: string }>(
+      `/api/stock-data/basic-info/${lookup.symbol}`,
+      undefined,
+      { skipErrorHandler: true, retryCount: 0 }
+    )
+    if (!lookup.isCurrent()) return
+    if (res.success && res.data?.name) {
+      stockNameSearch.setCodeName(res.data.name)
+      addFormRef.value?.clearValidate(['stock_name'])
+      ElMessage.success(`已自动填充股票名称: ${res.data.name}`)
+    } else {
+      ElMessage.warning('未找到该股票信息，请手动输入股票名称')
     }
-    // 港股和美股不调用API，用户需要手动输入
   } catch (error: any) {
+    if (!lookup.isCurrent()) return
     console.error('获取股票信息失败:', error)
     ElMessage.warning('获取股票信息失败，请手动输入股票名称')
   }
@@ -1197,6 +1243,32 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
+.stock-name-input {
+  width: 100%;
+}
+
+.stock-name-candidate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.stock-name-code,
+.stock-name-hint {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.stock-name-hint {
+  width: 100%;
+  margin-top: 4px;
+}
+
+:global(.stock-name-suggestions .el-autocomplete-suggestion__wrap) {
+  max-height: 240px;
+}
+
 .favorites {
   .page-header {
     margin-bottom: 24px;

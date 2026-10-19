@@ -2,7 +2,7 @@
 股票数据API路由 - 基于扩展数据模型
 提供标准化的股票数据访问接口
 """
-from typing import Optional, List
+from typing import Optional, List, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status
 
@@ -204,6 +204,7 @@ async def get_combined_stock_data(
 async def search_stocks(
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
     limit: int = Query(10, ge=1, le=50, description="返回数量限制"),
+    mode: Literal["default", "autocomplete"] = Query("default", description="搜索模式"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -212,11 +213,30 @@ async def search_stocks(
     Args:
         keyword: 搜索关键词 (股票代码或名称)
         limit: 返回数量限制
+        mode: 默认搜索或名称候选搜索
         
     Returns:
         dict: 搜索结果
     """
     try:
+        if mode == "autocomplete":
+            keyword = keyword.strip()
+            if not keyword or len(keyword) > 50:
+                raise HTTPException(
+                    status_code=422,
+                    detail="名称搜索关键词去除首尾空白后须为1至50个字符",
+                )
+            service = get_stock_data_service()
+            candidates = await service.search_stock_candidates(keyword, limit)
+            return {
+                "success": True,
+                "data": candidates,
+                "total": len(candidates),
+                "keyword": keyword,
+                "source": "mixed",
+                "message": "搜索完成",
+            }
+
         from app.core.database import get_mongo_db
         from app.core.unified_config import UnifiedConfigManager
 
@@ -279,7 +299,9 @@ async def search_stocks(
             "source": preferred_source,  # 🔥 返回数据来源
             "message": "搜索完成"
         }
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
