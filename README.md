@@ -19,10 +19,6 @@
 - ❌ **该网站未经授权使用我们的代码，属于侵权行为**
 - ⚠️ **请大家注意识别，避免上当受骗**
 
-**✅ 官方唯一渠道**：
-- 📦 GitHub 仓库：https://github.com/hsliuping/TradingAgents-CN
-- 📧 官方邮箱：hsliup@163.com
-- 📱 微信公众号：TradingAgents-CN
 
 如发现任何未经授权的商业使用，请通过上述渠道联系我们。
 
@@ -270,7 +266,6 @@
 ### 🔒 专有部分（需商业授权）
 - **适用范围**：`app/`（FastAPI后端）和 `frontend/`（Vue前端）目录
 - **商业使用**：需要单独许可协议
-- **联系授权**：[hsliup@163.com](mailto:hsliup@163.com)
 
 ### 📋 许可证选择建议
 - **个人学习/研究**：可自由使用全部功能
@@ -371,15 +366,9 @@
 
 ## 📞 联系方式
 
-- **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
-- **邮箱**: hsliup@163.com
-- 项目ＱＱ群：1091917201
-- 项目微信公众号：TradingAgents-CN
-
-  <img src="assets/wexin.png" alt="微信公众号" width="200"/>
-
-- **原项目**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
-- **文档**: [完整文档目录](docs/)
+- **GitHub Issues**: [提交问题和建议](https://github.com/springlin2012/TradingAgents-CN/issues)
+- **邮箱**: lichunlinmailbox@163.com
+- 联系ＱＱ：457109118
 
 ## ⚠️ 风险提示
 
@@ -395,7 +384,4 @@
 <div align="center">
 
 **🌟 如果这个项目对您有帮助，请给我们一个 Star！**
-
-[⭐ Star this repo](https://github.com/hsliuping/TradingAgents-CN) | [🍴 Fork this repo](https://github.com/hsliuping/TradingAgents-CN/fork) | [📖 Read the docs](./docs/)
-
 </div>
