@@ -20,6 +20,7 @@
 | [stock_data_model_design.md](stock_data_model_design.md) | **股票数据模型设计方案** | ✅ 最新 |
 | [stock_data_methods_analysis.md](stock_data_methods_analysis.md) | 股票数据获取方法整理分析 | ✅ 完成 |
 | [stock_data_quick_reference.md](stock_data_quick_reference.md) | 股票数据方法快速参考手册 | ✅ 完成 |
+| [指数查询接口设计_20261019.md](指数查询接口设计_20261019.md) | A 股 6 只宽基指数查询接口（独立目录/路由/集合） | ✅ 设计完成 |
 
 ### 🎤 提示词模版系统设计
 

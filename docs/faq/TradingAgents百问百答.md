@@ -1,6 +1,6 @@
 # TradingAgents 百问百答
 
-> 更新日期：2026-10-09
+> 更新日期：2026-10-20
 
 ## 1. 项目中的 AKShare 数据源是什么？
 
@@ -338,3 +338,46 @@ flowchart LR
 - `tradingagents/graph/trading_graph.py`：创建图并执行 `propagate()`；
 - `app/models/analysis.py`：默认 `selected_analysts`；
 - `docs/股票分析任务执行流程.md`：一次分析的完整调用链路。
+
+## 7. 不同用户需要单独配置模型厂商、模型版本吗？还是全局的？
+
+**全局的。** 厂家、模型清单、API Key、默认模型都是整站一份，不是按用户隔离。管理员在「设置 → 配置管理」里改一次，所有用户共用。
+
+### 配置分层
+
+| 层级 | 存什么 | 按用户隔离？ |
+| --- | --- | --- |
+| `llm_providers` | 厂家、API Key、Base URL | 否，全站共用 |
+| `system_configs.llm_configs` | 可用模型（名称、价格、能力） | 否 |
+| `model_catalog` | 模型目录 | 否 |
+| 用户偏好 `users.preferences` | 默认市场、分析深度、分析师、主题 | 是，但**没有**厂商/模型字段 |
+| 单次分析任务 | `quick_analysis_model` / `deep_analysis_model` | 只对这次任务生效 |
+
+### 用户能选什么
+
+发起分析时，可以从**全局已启用模型**里选快速模型和深度模型，写入这次任务参数。没选就用系统默认。这不是用户自己的厂商配置，只是从公共池里挑一个。
+
+```text
+管理员配置厂家/模型（全局）
+        ↓
+用户发起分析时从已启用列表中选择
+        ↓
+写入本次任务的 quick_analysis_model / deep_analysis_model
+```
+
+### 现在做不到的
+
+- 用户 A 用自己的 DashScope Key，用户 B 用自己的 OpenAI Key；
+- 每个用户单独维护一套厂家或模型目录；
+- 用户偏好里记住自己常用的厂商。
+
+架构文档 `docs/config/architecture.md` 里的「用户/租户偏好」还在 P2 待办。导出清单里出现过 `user_configs` 集合，但后端主流程没有按用户读写厂家/模型配置。
+
+相关源码位置：
+
+- `app/models/config.py`：`LLMProvider`、`LLMConfig`、`SystemConfig`，均无 `user_id`；
+- `app/models/user.py`：`UserPreferences` 只有市场、深度、分析师、主题等，不含厂商；
+- `app/models/analysis.py`：任务参数里的 `quick_analysis_model` / `deep_analysis_model`；
+- `app/services/config_service.py`：读写全局 `llm_providers` 和 `system_configs`；
+- `frontend/src/views/Settings/ConfigManagement.vue`：配置管理页面；
+- `frontend/src/views/Analysis/SingleAnalysis.vue`：分析时从全局模型列表中选择。
