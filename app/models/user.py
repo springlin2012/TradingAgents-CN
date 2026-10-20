@@ -79,6 +79,8 @@ class User(BaseModel):
     phone: Optional[str] = None
     wechat_openid: Optional[str] = None
     wechat_unionid: Optional[str] = None
+    nickname: Optional[str] = None
+    avatar: Optional[str] = None
     is_active: bool = True
     is_verified: bool = False
     is_admin: bool = False
@@ -112,6 +114,8 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     """更新用户请求模型"""
     email: Optional[str] = Field(None, pattern=r'^[^@]+@[^@]+\.[^@]+$')
+    nickname: Optional[str] = Field(None, min_length=1, max_length=32)
+    avatar: Optional[str] = None
     preferences: Optional[UserPreferences] = None
     daily_quota: Optional[int] = None
     concurrent_limit: Optional[int] = None

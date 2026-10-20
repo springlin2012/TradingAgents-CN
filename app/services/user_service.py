@@ -376,18 +376,23 @@ class UserService:
             
             if user_data.concurrent_limit is not None:
                 update_data["concurrent_limit"] = user_data.concurrent_limit
+
+            if user_data.nickname is not None:
+                update_data["nickname"] = user_data.nickname.strip()
+
+            if user_data.avatar is not None:
+                update_data["avatar"] = user_data.avatar
             
             result = self.users_collection.update_one(
                 {"username": username},
                 {"$set": update_data}
             )
             
-            if result.modified_count > 0:
-                logger.info(f"✅ 用户信息更新成功: {username}")
-                return await self.get_user_by_username(username)
-            else:
+            if result.matched_count == 0:
                 logger.warning(f"用户不存在或无需更新: {username}")
                 return None
+            logger.info(f"✅ 用户信息更新成功: {username}")
+            return await self.get_user_by_username(username)
                 
         except Exception as e:
             logger.error(f"❌ 更新用户信息失败: {e}")

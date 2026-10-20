@@ -4,10 +4,14 @@
 """
 
 import time
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Header, Request, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+
+from app.core.config import settings
 
 from app.services.auth_service import AuthService
 from app.services.user_service import user_service
@@ -48,6 +52,11 @@ class LoginRequest(BaseModel):
 
 class SendSmsRequest(BaseModel):
     phone: str
+
+
+class ProfileUpdateRequest(BaseModel):
+    nickname: Optional[str] = Field(default=None, min_length=1, max_length=32)
+    avatar: Optional[str] = None
 
 class LoginResponse(BaseModel):
     access_token: str
@@ -123,7 +132,17 @@ async def get_current_user(authorization: Optional[str] = Header(default=None)) 
         "roles": ["admin"] if user.is_admin else ["user"],
         "preferences": user.preferences.model_dump() if user.preferences else {},
         "phone": getattr(user, "phone", None),
+        "nickname": getattr(user, "nickname", None),
+        "avatar": getattr(user, "avatar", None),
+        "name": (getattr(user, "nickname", None) or user.username),
     }
+
+
+def _display_name(user) -> str:
+    nickname = getattr(user, "nickname", None)
+    if nickname:
+        return nickname
+    return user.username
 
 
 def _public_user(user) -> dict:
@@ -131,7 +150,9 @@ def _public_user(user) -> dict:
         "id": str(user.id),
         "username": user.username,
         "email": user.email,
-        "name": user.username,
+        "name": _display_name(user),
+        "nickname": getattr(user, "nickname", None),
+        "avatar": getattr(user, "avatar", None),
         "is_admin": user.is_admin,
         "phone": getattr(user, "phone", None),
     }
@@ -330,6 +351,83 @@ async def me(user: dict = Depends(get_current_user)):
         "message": "获取用户信息成功"
     }
 
+@router.post("/profile")
+async def update_profile(
+    payload: ProfileUpdateRequest,
+    user: dict = Depends(get_current_user),
+):
+    """更新展示昵称 / 头像，不改内部 username。"""
+    update_data = {}
+    if payload.nickname is not None:
+        nickname = payload.nickname.strip()
+        if not nickname:
+            raise HTTPException(status_code=400, detail="昵称不能为空")
+        update_data["nickname"] = nickname
+    if payload.avatar:
+        update_data["avatar"] = payload.avatar
+    if not update_data:
+        raise HTTPException(status_code=400, detail="没有可更新的资料")
+
+    updated_user = await user_service.update_user(user["username"], UserUpdate(**update_data))
+    if not updated_user:
+        raise HTTPException(status_code=400, detail="资料更新失败")
+    return {
+        "success": True,
+        "data": _public_user(updated_user),
+        "message": "资料已更新",
+    }
+
+
+@router.post("/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    """上传头像，返回可访问路径。"""
+    content_type = (file.content_type or "").lower()
+    if content_type and not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="只支持图片头像")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="头像文件为空")
+    if len(raw) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="头像不能超过 2MB")
+
+    ext = ".jpg"
+    if "png" in content_type:
+        ext = ".png"
+    elif "webp" in content_type:
+        ext = ".webp"
+    elif "gif" in content_type:
+        ext = ".gif"
+
+    folder = Path(settings.UPLOAD_DIR) / "avatars"
+    folder.mkdir(parents=True, exist_ok=True)
+    filename = f"{user['id']}{ext}"
+    (folder / filename).write_bytes(raw)
+
+    avatar_url = f"/api/auth/avatars/{filename}"
+    updated_user = await user_service.update_user(user["username"], UserUpdate(avatar=avatar_url))
+    if not updated_user:
+        raise HTTPException(status_code=400, detail="头像保存失败")
+    return {
+        "success": True,
+        "data": _public_user(updated_user),
+        "message": "头像已更新",
+    }
+
+
+@router.get("/avatars/{filename}")
+async def get_avatar(filename: str):
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="无效文件名")
+    path = Path(settings.UPLOAD_DIR) / "avatars" / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="头像不存在")
+    return FileResponse(path)
+
+
 @router.put("/me")
 async def update_me(
     payload: dict,
@@ -345,6 +443,17 @@ async def update_me(
         # 更新邮箱
         if "email" in payload:
             update_data["email"] = payload["email"]
+
+        if "nickname" in payload and payload["nickname"] is not None:
+            nickname = str(payload["nickname"]).strip()
+            if not nickname:
+                raise HTTPException(status_code=400, detail="昵称不能为空")
+            if len(nickname) > 32:
+                raise HTTPException(status_code=400, detail="昵称不能超过 32 个字符")
+            update_data["nickname"] = nickname
+
+        if "avatar" in payload and payload["avatar"]:
+            update_data["avatar"] = payload["avatar"]
 
         # 更新偏好设置（支持部分更新）
         if "preferences" in payload:
@@ -375,10 +484,9 @@ async def update_me(
         if not updated_user:
             raise HTTPException(status_code=400, detail="更新失败，邮箱可能已被使用")
 
-        # 返回更新后的用户信息
         return {
             "success": True,
-            "data": updated_user.model_dump(by_alias=True),
+            "data": _public_user(updated_user),
             "message": "用户信息更新成功"
         }
     except HTTPException:
