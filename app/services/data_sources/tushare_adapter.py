@@ -1,7 +1,7 @@
 """
 Tushare data source adapter
 """
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 import logging
 from datetime import datetime, timedelta
 import pandas as pd
@@ -310,4 +310,3 @@ class TushareAdapter(DataSourceAdapter):
         except Exception as e:
             logger.error(f"Tushare: Failed to find latest trade date: {e}")
         return None
-

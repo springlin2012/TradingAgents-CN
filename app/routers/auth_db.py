@@ -7,8 +7,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Header, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -31,6 +32,13 @@ except ImportError:
         return logging.getLogger(name)
 
 logger = get_logger('auth_db')
+
+# 用 HTTPBearer，Swagger /docs 才会把 token 放进 Authorization 头。
+# 若写成 Header() 参数，Try it out 只显示输入框，实际请求不会带这个头。
+_bearer_scheme = HTTPBearer(
+    auto_error=False,
+    description="先调 POST /api/auth/login 拿 access_token，再点右上角 Authorize 填入（不必手写 Bearer）",
+)
 
 # 统一响应格式
 class ApiResponse(BaseModel):
@@ -86,9 +94,18 @@ class CreateUserRequest(BaseModel):
     password: str
     is_admin: bool = False
 
-async def get_current_user(authorization: Optional[str] = Header(default=None)) -> dict:
+async def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+) -> dict:
     """获取当前用户信息"""
-    logger.debug(f"🔐 认证检查开始")
+    logger.debug("🔐 认证检查开始")
+
+    if credentials is not None:
+        authorization = f"{credentials.scheme} {credentials.credentials}"
+    else:
+        authorization = request.headers.get("Authorization") or request.headers.get("authorization")
+
     logger.debug(f"📋 Authorization header: {authorization[:50] if authorization else 'None'}...")
 
     if not authorization:

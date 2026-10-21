@@ -1,7 +1,7 @@
 """
 Data source manager that orchestrates multiple adapters with priority and optional consistency checks
 """
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple, Dict, Any
 import logging
 from datetime import datetime, timedelta
 import pandas as pd
@@ -292,6 +292,41 @@ class DataSourceManager:
                 logger.error(f"Failed to fetch kline from {adapter.name}: {e}")
                 continue
         return None, None
+
+    def get_index_quotes_with_fallback(
+        self, full_symbols: List[str]
+    ) -> Tuple[Optional[Dict[str, Dict]], Optional[str]]:
+        """指数行情只走 AKShare 现货（spot 缺失时 adapter 内用日线最新一行兜底）。
+
+        明确不调用 Tushare / BaoStock。
+        """
+        remaining = [symbol for symbol in full_symbols if symbol]
+        if not remaining:
+            return None, None
+
+        adapters_by_name = {adapter.name: adapter for adapter in self.get_available_adapters()}
+        adapter = adapters_by_name.get("akshare")
+        if adapter is None:
+            logger.warning("Index quotes skipped: AKShare adapter unavailable")
+            return None, None
+        try:
+            logger.info("Trying to fetch index quotes from akshare")
+            data = adapter.get_index_quotes(remaining)
+        except Exception as e:
+            logger.error(f"Failed to fetch index quotes from akshare: {e}")
+            return None, None
+        if not data:
+            return None, None
+        merged: Dict[str, Dict] = {}
+        for symbol, quote in data.items():
+            if symbol not in remaining or not quote:
+                continue
+            quote = dict(quote)
+            quote["data_source"] = adapter.name
+            merged[symbol] = quote
+        if not merged:
+            return None, None
+        return merged, adapter.name
 
     def get_news_with_fallback(self, code: str, days: int = 2, limit: int = 50, include_announcements: bool = True) -> Tuple[Optional[List[Dict]], Optional[str]]:
         """按优先级尝试获取新闻与公告，返回(items, source)"""

@@ -362,6 +362,13 @@ async def create_database_indexes(db):
         await market_quotes.create_index([("amount", -1)])
         await market_quotes.create_index([("updated_at", -1)])
 
+        index_quotes = db["index_quotes"]
+        await index_quotes.create_index([("full_symbol", 1)], unique=True)
+        await index_quotes.create_index([("updated_at", -1)])
+
+        index_ingestion_status = db["index_ingestion_status"]
+        await index_ingestion_status.create_index([("job", 1)], unique=True)
+
         logger.info("✅ 数据库索引创建完成")
 
     except Exception as e:

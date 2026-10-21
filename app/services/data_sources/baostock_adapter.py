@@ -1,7 +1,7 @@
 """
 BaoStock data source adapter
 """
-from typing import Optional
+from typing import Optional, Dict, List
 import logging
 from datetime import datetime, timedelta
 import pandas as pd
@@ -247,10 +247,6 @@ class BaoStockAdapter(DataSourceAdapter):
         if not self.is_available():
             return None
         return None
-
-        """Placeholder: BaoStock  does not provide full-market realtime snapshot in our adapter.
-        Return None to allow fallback to higher-priority sources.
-        """
 
     def find_latest_trade_date(self) -> Optional[str]:
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")

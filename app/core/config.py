@@ -222,6 +222,11 @@ class Settings(BaseSettings):
         default=360,
         description="实时行情采集间隔（秒）。默认360秒（6分钟），免费用户建议>=300秒，付费用户可设置5-60秒"
     )
+    INDEX_QUOTES_INGEST_ENABLED: bool = Field(default=True)
+    INDEX_QUOTES_INGEST_INTERVAL_SECONDS: int = Field(
+        default=60,
+        description="指数行情采集间隔（秒）",
+    )
     # 休市期/启动兜底补数（填充上一笔快照）
     QUOTES_BACKFILL_ON_STARTUP: bool = Field(default=True)
     QUOTES_BACKFILL_ON_OFFHOURS: bool = Field(default=True)

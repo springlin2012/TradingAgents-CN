@@ -71,10 +71,12 @@ from app.routers import paper as paper_router
 from app.routers import scheduler as scheduler_router
 from app.routers import stock_data as stock_data_router
 from app.routers import stock_sync as stock_sync_router
+from app.routers import indexes as indexes_router
 from app.routers import stocks as stocks_router
 from app.routers import sync as sync_router
 from app.routers import websocket_notifications as websocket_notifications_router
 from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
+from app.services.index_quotes_ingestion_service import IndexQuotesIngestionService
 from app.services.quotes_ingestion_service import QuotesIngestionService
 from app.services.scheduler_service import set_scheduler_instance
 from app.worker.akshare_sync_service import (
@@ -413,6 +415,22 @@ async def lifespan(app: FastAPI):
             )
             logger.info(
                 f"⏱ 实时行情入库任务已启动: 每 {settings.QUOTES_INGEST_INTERVAL_SECONDS}s"
+            )
+
+        if settings.INDEX_QUOTES_INGEST_ENABLED:
+            index_ingestion = IndexQuotesIngestionService()
+            await index_ingestion.ensure_indexes()
+            scheduler.add_job(
+                index_ingestion.run_once,
+                IntervalTrigger(
+                    seconds=settings.INDEX_QUOTES_INGEST_INTERVAL_SECONDS,
+                    timezone=settings.TIMEZONE,
+                ),
+                id="index_quotes_ingestion_service",
+                name="指数行情入库服务",
+            )
+            logger.info(
+                f"⏱ 指数行情入库任务已启动: 每 {settings.INDEX_QUOTES_INGEST_INTERVAL_SECONDS}s"
             )
 
         # Tushare统一数据同步任务配置
@@ -814,6 +832,12 @@ app = FastAPI(
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
     lifespan=lifespan,
+    openapi_tags=[
+        {
+            "name": "indexes",
+            "description": "A 股 6 只宽基指数查询（上证/深证成指/创业板/沪深300/科创50/北证50）。仅最新行情，无 K 线，数据源 AKShare。鉴权后在右上角 Authorize 填 access_token。",
+        }
+    ],
 )
 
 # 安全中间件
@@ -902,6 +926,7 @@ app.include_router(screening.router, prefix="/api/screening", tags=["screening"]
 app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
 app.include_router(favorites.router, prefix="/api", tags=["favorites"])
 app.include_router(stocks_router.router, prefix="/api", tags=["stocks"])
+app.include_router(indexes_router.router, prefix="/api")
 app.include_router(
     multi_market_stocks_router.router, prefix="/api", tags=["multi-market"]
 )

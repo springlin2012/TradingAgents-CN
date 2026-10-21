@@ -2,7 +2,7 @@
 Base classes and shared typing for data source adapters
 """
 from abc import ABC, abstractmethod
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 import pandas as pd
 
 
@@ -67,3 +67,7 @@ class DataSourceAdapter(ABC):
     def get_news(self, code: str, days: int = 2, limit: int = 50, include_announcements: bool = True):
         """获取新闻/公告，返回 [{title, source, time, url, type}]，type in ['news','announcement']"""
         raise NotImplementedError
+
+    def get_index_quotes(self, full_symbols: List[str]) -> Optional[Dict[str, Dict]]:
+        """指数最新行情，键为 full_symbol（如 000001.SH）。默认不支持。"""
+        return None

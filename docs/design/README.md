@@ -20,7 +20,9 @@
 | [stock_data_model_design.md](stock_data_model_design.md) | **股票数据模型设计方案** | ✅ 最新 |
 | [stock_data_methods_analysis.md](stock_data_methods_analysis.md) | 股票数据获取方法整理分析 | ✅ 完成 |
 | [stock_data_quick_reference.md](stock_data_quick_reference.md) | 股票数据方法快速参考手册 | ✅ 完成 |
-| [指数查询接口设计_20261019.md](指数查询接口设计_20261019.md) | A 股 6 只宽基指数查询接口（独立目录/路由/集合） | ✅ 设计完成 |
+| [指数查询接口设计_20261019.md](../features/minniprogram/指数查询接口设计_20261019.md) | A 股 6 只宽基指数查询接口契约（独立目录/路由/集合） | ✅ 设计完成 |
+| [指数查询系统设计_20261020.md](../features/minniprogram/指数查询系统设计_20261020.md) | A 股指数查询实现向系统设计（行情仅 AKShare，无 K 线） | ✅ 已调整 |
+| [新闻数据获取功能设计_20261021.md](新闻数据获取功能设计_20261021.md) | 个股/市场新闻数据源、HTTP 接口、`stock_news` schema | ✅ 基于现网代码 |
 
 ### 🎤 提示词模版系统设计
 
