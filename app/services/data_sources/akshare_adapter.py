@@ -1,8 +1,9 @@
 """
 AKShare data source adapter
 """
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Callable
 import logging
+import os
 from datetime import datetime, timedelta
 import pandas as pd
 
@@ -390,25 +391,51 @@ class AKShareAdapter(DataSourceAdapter):
         logger.info(f"AKShare: Using yesterday as trade date: {yesterday}")
         return yesterday
 
+    def _call_akshare(self, fn: Callable, label: str):
+        """东财接口常被本机代理掐断，失败后去掉代理再试一次。"""
+        try:
+            return fn()
+        except Exception as e:
+            if not self._is_proxy_error(e):
+                raise
+            logger.warning(f"AKShare {label} 经代理失败，改为直连: {e}")
+            saved = {}
+            for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+                if key in os.environ:
+                    saved[key] = os.environ.pop(key)
+            try:
+                return fn()
+            finally:
+                os.environ.update(saved)
+
+    @staticmethod
+    def _is_proxy_error(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return "proxy" in text or "remote end closed connection" in text or "connection aborted" in text
+
     def get_index_quotes(self, full_symbols: List[str]) -> Optional[Dict[str, Dict]]:
-        """东财指数现货。禁止使用 stock_zh_a_spot*。"""
+        """指数现货：东财 spot 一次拉全市场，失败再用腾讯日线最新一行补。禁止 stock_zh_a_spot*。"""
         if not self.is_available() or not full_symbols:
             return None
-        from app.services.index_catalog import get_index_by_full_symbol, sanitize_index_amount
+        from app.services.index_catalog import get_index_by_full_symbol
 
+        specs = []
         wanted = {}
         for ts_code in full_symbols:
             spec = get_index_by_full_symbol(ts_code)
-            if spec:
-                wanted[spec.akshare_symbol.lower()] = spec
-                wanted[spec.symbol] = spec
+            if spec is None:
+                continue
+            specs.append(spec)
+            wanted[spec.akshare_symbol.lower()] = spec
+            wanted[spec.symbol] = spec
         if not wanted:
             return None
+
+        result: Dict[str, Dict] = {}
         try:
             import akshare as ak
 
-            df = ak.stock_zh_index_spot_em()
-            result: Dict[str, Dict] = {}
+            df = self._call_akshare(ak.stock_zh_index_spot_em, "stock_zh_index_spot_em")
             if df is not None and not getattr(df, "empty", True):
                 for _, row in df.iterrows():
                     raw_code = str(row.get("代码") or row.get("code") or "").strip().lower()
@@ -418,19 +445,15 @@ class AKShareAdapter(DataSourceAdapter):
                     if spec is None:
                         continue
                     result[spec.full_symbol] = self._index_spot_row_to_quote(row, spec.full_symbol)
-            missing = [code for code in full_symbols if code not in result]
-            for ts_code in missing:
-                spec = get_index_by_full_symbol(ts_code)
-                if spec is None:
-                    continue
-                daily = self._get_index_daily_latest(spec)
-                if not daily:
-                    continue
-                result[ts_code] = daily
-            return result or None
         except Exception as e:
-            logger.error(f"AKShare get_index_quotes failed: {e}")
-            return None
+            logger.error(f"AKShare get_index_quotes spot failed: {e}")
+
+        missing = [spec for spec in specs if spec.full_symbol not in result]
+        for spec in missing:
+            daily = self._get_index_daily_latest(spec)
+            if daily:
+                result[spec.full_symbol] = daily
+        return result or None
 
     def _index_spot_row_to_quote(self, row, full_symbol: str) -> Dict:
         from app.services.index_catalog import sanitize_index_amount
@@ -467,34 +490,51 @@ class AKShareAdapter(DataSourceAdapter):
         }
 
     def _get_index_daily_latest(self, spec) -> Optional[Dict]:
-        """spot 缺失时用东财指数日线最新一行补 quote，不对外提供 K 线。"""
+        """spot 缺失时用腾讯指数日线最新一行补 quote，不对外提供 K 线。"""
         from app.services.index_catalog import sanitize_index_amount
 
         try:
             import akshare as ak
 
-            df = ak.stock_zh_index_daily_em(symbol=spec.akshare_symbol)
+            df = self._call_akshare(
+                lambda: ak.stock_zh_index_daily(symbol=spec.akshare_symbol),
+                f"stock_zh_index_daily:{spec.akshare_symbol}",
+            )
             if df is None or getattr(df, "empty", True):
                 return None
-            date_col = "日期" if "日期" in df.columns else "date" if "date" in df.columns else df.columns[0]
+            date_col = "date" if "date" in df.columns else "日期" if "日期" in df.columns else df.columns[0]
             df = df.sort_values(date_col)
             row = df.iloc[-1]
+            prev = df.iloc[-2] if len(df) > 1 else None
             close = self._safe_float(row.get("收盘") or row.get("close"))
+            pre_close = self._safe_float(prev.get("收盘") or prev.get("close")) if prev is not None else None
+            high = self._safe_float(row.get("最高") or row.get("high"))
+            low = self._safe_float(row.get("最低") or row.get("low"))
+            change = None
+            pct = self._safe_float(row.get("涨跌幅") or row.get("pct_chg"))
+            if close is not None and pre_close is not None:
+                change = round(close - pre_close, 4)
+                if pct is None and pre_close:
+                    pct = round((close - pre_close) / pre_close * 100, 4)
+            amplitude = None
+            if high is not None and low is not None and pre_close:
+                amplitude = round((high - low) / pre_close * 100, 2)
+            trade_date = str(row.get(date_col) or "")[:10]
             return {
                 "price": close,
                 "open": self._safe_float(row.get("开盘") or row.get("open")),
-                "high": self._safe_float(row.get("最高") or row.get("high")),
-                "low": self._safe_float(row.get("最低") or row.get("low")),
-                "prev_close": None,
-                "change": None,
-                "change_percent": self._safe_float(row.get("涨跌幅") or row.get("pct_chg")),
-                "amplitude": None,
+                "high": high,
+                "low": low,
+                "prev_close": pre_close,
+                "change": change,
+                "change_percent": pct,
+                "amplitude": amplitude,
                 "volume": self._safe_float(row.get("成交量") or row.get("volume")),
                 "amount": sanitize_index_amount(row.get("成交额") or row.get("amount"), spec.full_symbol),
                 "turnover_rate": None,
                 "pe": None,
                 "pb": None,
-                "trade_date": str(row.get(date_col) or "")[:10],
+                "trade_date": trade_date or None,
             }
         except Exception as e:
             logger.warning(f"AKShare index daily fallback failed for {spec.full_symbol}: {e}")

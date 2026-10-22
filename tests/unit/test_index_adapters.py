@@ -28,7 +28,26 @@ def test_akshare_index_quotes_does_not_call_stock_spot():
         result = adapter.get_index_quotes(["000001.SH"])
     fake_ak.stock_zh_a_spot_em.assert_not_called()
     fake_ak.stock_zh_a_hist.assert_not_called()
+    fake_ak.stock_zh_index_daily.assert_not_called()
     assert result["000001.SH"]["price"] == 3730.92
+
+
+def test_akshare_index_quotes_falls_back_to_tencent_daily():
+    adapter = AKShareAdapter()
+    daily = pd.DataFrame([
+        {"date": "2026-10-20", "open": 1, "high": 2, "low": 0.5, "close": 1.4, "volume": 10},
+        {"date": "2026-10-21", "open": 1.4, "high": 2, "low": 1, "close": 1.5, "volume": 20},
+    ])
+    fake_ak = MagicMock()
+    fake_ak.stock_zh_index_spot_em.side_effect = Exception("ProxyError('Unable to connect to proxy')")
+    fake_ak.stock_zh_index_daily.return_value = daily
+    with patch.dict("sys.modules", {"akshare": fake_ak}):
+        adapter.is_available = lambda: True
+        with patch.object(adapter, "_call_akshare", side_effect=lambda fn, label: fn()):
+            result = adapter.get_index_quotes(["000001.SH"])
+    fake_ak.stock_zh_index_daily.assert_called()
+    assert result["000001.SH"]["price"] == 1.5
+    assert result["000001.SH"]["prev_close"] == 1.4
 
 
 def test_manager_index_quotes_only_uses_akshare():

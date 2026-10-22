@@ -18,7 +18,7 @@ from app.utils.timezone import get_tz, now_tz
 
 logger = logging.getLogger(__name__)
 
-EXTERNAL_TIMEOUT = 10.0
+EXTERNAL_TIMEOUT = 30.0
 
 
 def get_trade_session(now: Optional[datetime] = None) -> str:
@@ -81,11 +81,47 @@ class IndexDataService:
             specs = list_indexes()
 
         session = get_trade_session()
+        cached_by_symbol: Dict[str, Dict[str, Any]] = {}
+        missing: List[IndexSpec] = []
+        for spec in specs:
+            cached = None if force_refresh else await self._read_quote(spec.full_symbol)
+            if cached:
+                cached_by_symbol[spec.full_symbol] = cached
+            else:
+                missing.append(spec)
+
+        fetched: Dict[str, Dict[str, Any]] = {}
+        source = None
+        if missing:
+            try:
+                quotes, source = await self._fetch_quotes_external(
+                    [spec.full_symbol for spec in missing]
+                )
+                fetched = quotes or {}
+            except IndexQuotesTimeout:
+                raise
+            except Exception as e:
+                logger.warning(f"batch index quotes failed: {e}")
+
         items = []
         for spec in specs:
             try:
-                quote = await self._load_quote(spec, force_refresh=force_refresh)
-                items.append(quote)
+                if spec.full_symbol in cached_by_symbol:
+                    items.append(
+                        self._quote_from_doc(
+                            spec,
+                            cached_by_symbol[spec.full_symbol],
+                            session,
+                            cached_by_symbol[spec.full_symbol].get("data_source") or "mongodb",
+                        )
+                    )
+                    continue
+                data = fetched.get(spec.full_symbol)
+                if not data:
+                    items.append(self._unavailable(spec, "未找到行情", session))
+                    continue
+                doc = await self._write_quote(spec, data, source or data.get("data_source") or "unknown")
+                items.append(self._quote_from_doc(spec, doc, session, source or "unknown"))
             except Exception as e:
                 logger.warning(f"index quote failed for {spec.full_symbol}: {e}")
                 items.append(self._unavailable(spec, str(e), session))
