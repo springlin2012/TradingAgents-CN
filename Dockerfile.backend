@@ -15,11 +15,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# 替换为阿里云镜像源（加速国内下载）
 # 创建必需的目录并安装系统依赖
 # - curl: 健康检查
 # - pandoc: 从 GitHub 下载最新版本（避免 Debian 仓库问题）
 # - wkhtmltopdf: 从官方下载（用于 PDF 生成）
 # - 中文字体: 用于 PDF 中文显示
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 RUN mkdir -p /app/logs /app/data /app/config && \
     # 配置 apt 重试和超时
     echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries && \

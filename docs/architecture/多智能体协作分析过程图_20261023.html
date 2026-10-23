@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>多智能体协作分析过程</title>
+  <style>
+    :root {
+      --bg: #070b16;
+      --panel: #0d1526;
+      --line: #1c3a5c;
+      --text: #e8eef7;
+      --muted: #8b9bb4;
+      --c1: #3ec6ff;
+      --c2: #f0b429;
+      --c3: #2ec4b6;
+      --c4: #ff7a59;
+      --c5: #7bd36a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+    }
+    body {
+      min-height: 100vh;
+      background-image:
+        linear-gradient(rgba(62, 198, 255, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(62, 198, 255, 0.045) 1px, transparent 1px);
+      background-size: 36px 36px;
+    }
+    .board {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 28px 32px 36px;
+    }
+    .head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .title-wrap { display: flex; align-items: center; gap: 14px; }
+    .hex-logo {
+      width: 42px; height: 36px;
+      clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+      background: var(--c1);
+    }
+    h1 { font-size: 26px; font-weight: 500; letter-spacing: 2px; }
+    .sub { margin-top: 4px; font-size: 13px; color: var(--muted); letter-spacing: 1px; }
+    .status {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 12px;
+      border: 1px solid var(--c3);
+      color: var(--c3);
+      font-size: 13px;
+      background: rgba(46, 196, 182, 0.08);
+    }
+    .pulse {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--c3);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse { 50% { opacity: 0.3; } }
+    .track {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .tk {
+      position: relative;
+      text-align: center;
+      padding: 12px 8px 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+    .tk:after {
+      content: "";
+      position: absolute;
+      right: -8px; top: 50%;
+      width: 8px; height: 1px;
+      background: var(--c1);
+    }
+    .tk:last-child:after { display: none; }
+    .tk .n {
+      display: inline-block;
+      min-width: 36px;
+      padding: 2px 0;
+      font-size: 12px;
+      letter-spacing: 1px;
+      color: #071018;
+      margin-bottom: 6px;
+    }
+    .tk b { display: block; font-size: 15px; font-weight: 500; }
+    .tk span { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
+    .t1 { border-color: var(--c1); } .t1 .n { background: var(--c1); }
+    .t2 { border-color: var(--c2); } .t2 .n { background: var(--c2); }
+    .t3 { border-color: var(--c3); } .t3 .n { background: var(--c3); }
+    .t4 { border-color: var(--c4); } .t4 .n { background: var(--c4); }
+    .t5 { border-color: var(--c5); } .t5 .n { background: var(--c5); }
+    .wrap { display: flex; gap: 16px; }
+    .rail {
+      width: 22px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 28px;
+    }
+    .port {
+      width: 12px; height: 12px;
+      transform: rotate(45deg);
+      border: 1.5px solid currentColor;
+      background: var(--bg);
+      flex-shrink: 0;
+    }
+    .bus {
+      width: 1px; flex: 1;
+      background: repeating-linear-gradient(to bottom, currentColor 0 5px, transparent 5px 10px);
+      opacity: 0.55;
+    }
+    .col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+    .layer {
+      position: relative;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 14px 16px 14px 18px;
+    }
+    .layer:before {
+      content: "";
+      position: absolute;
+      left: 0; top: 10px; bottom: 10px;
+      width: 3px;
+    }
+    .corner { position: absolute; width: 10px; height: 10px; pointer-events: none; }
+    .tl { top: -1px; left: -1px; border-top: 2px solid currentColor; border-left: 2px solid currentColor; }
+    .tr { top: -1px; right: -1px; border-top: 2px solid currentColor; border-right: 2px solid currentColor; }
+    .bl { bottom: -1px; left: -1px; border-bottom: 2px solid currentColor; border-left: 2px solid currentColor; }
+    .br { bottom: -1px; right: -1px; border-bottom: 2px solid currentColor; border-right: 2px solid currentColor; }
+    .hrow { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+    .name { font-size: 16px; font-weight: 500; }
+    .desc { margin-top: 3px; font-size: 12px; color: var(--muted); }
+    .tag {
+      font-size: 12px;
+      padding: 3px 8px;
+      border: 1px solid currentColor;
+      white-space: nowrap;
+      background: rgba(255,255,255,0.03);
+    }
+    .g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .chip {
+      position: relative;
+      background: rgba(7, 11, 22, 0.72);
+      border: 1px solid var(--line);
+      padding: 10px 10px 10px 12px;
+    }
+    .chip:before {
+      content: "";
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 2px;
+    }
+    .chip strong { display: block; font-size: 14px; font-weight: 500; }
+    .chip em { display: block; margin-top: 3px; font-style: normal; font-size: 12px; color: var(--muted); }
+    .split {
+      display: flex; align-items: center; gap: 10px;
+      margin: 10px 0 8px;
+      font-size: 12px; color: var(--muted);
+    }
+    .split i { flex: 1; height: 0; border-top: 1px dashed currentColor; opacity: 0.55; }
+    .judge {
+      padding: 10px 12px;
+      border: 1px solid currentColor;
+      background: rgba(255,255,255,0.04);
+    }
+    .judge strong { display: block; font-size: 14px; font-weight: 500; }
+    .judge em { display: block; margin-top: 3px; font-style: normal; font-size: 12px; color: var(--muted); }
+    .l1 { color: var(--c1); } .l1:before { background: var(--c1); } .l1 .chip:before { background: var(--c1); }
+    .l2 { color: var(--c2); } .l2:before { background: var(--c2); } .l2 .chip:before { background: var(--c2); }
+    .l3 { color: var(--c3); } .l3:before { background: var(--c3); } .l3 .chip:before { background: var(--c3); }
+    .l4 { color: var(--c4); } .l4:before { background: var(--c4); } .l4 .chip:before { background: var(--c4); }
+    .l5 { color: var(--c5); } .l5:before { background: var(--c5); } .l5 .chip:before { background: var(--c5); }
+    .note { margin-top: 12px; font-size: 12px; color: var(--muted); letter-spacing: 0.4px; }
+    @media (max-width: 900px) {
+      .g4, .g3 { grid-template-columns: 1fr 1fr; }
+      .track { grid-template-columns: 1fr 1fr; }
+      .tk:after { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="board">
+    <header class="head">
+      <div class="title-wrap">
+        <div class="hex-logo"></div>
+        <div>
+          <h1>多智能体协作分析过程</h1>
+          <div class="sub">四维研判 · 多空辩论 · 交易规划 · 风险裁决 · 最终决策</div>
+        </div>
+      </div>
+      <div class="status"><span class="pulse"></span>链路就绪</div>
+    </header>
+
+    <div class="track">
+      <div class="tk t1"><div class="n">01</div><b>分析研判</b><span>四份独立报告</span></div>
+      <div class="tk t2"><div class="n">02</div><b>研究辩论</b><span>一份综合决策</span></div>
+      <div class="tk t3"><div class="n">03</div><b>交易规划</b><span>一份交易计划</span></div>
+      <div class="tk t4"><div class="n">04</div><b>风险裁决</b><span>一份风险管理决策</span></div>
+      <div class="tk t5"><div class="n">05</div><b>最终决策</b><span>一份最终交易决策</span></div>
+    </div>
+
+    <div class="wrap">
+      <div class="rail">
+        <div class="port" style="color:var(--c1);background:var(--c1);"></div>
+        <div class="bus" style="color:var(--c1);"></div>
+        <div class="port" style="color:var(--c2);background:var(--c2);"></div>
+        <div class="bus" style="color:var(--c2);"></div>
+        <div class="port" style="color:var(--c3);background:var(--c3);"></div>
+        <div class="bus" style="color:var(--c3);"></div>
+        <div class="port" style="color:var(--c4);background:var(--c4);"></div>
+        <div class="bus" style="color:var(--c4);"></div>
+        <div class="port" style="color:var(--c5);background:var(--c5);"></div>
+      </div>
+
+      <div class="col">
+        <section class="layer l1">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div class="hrow">
+            <div>
+              <div class="name">第一层 · 分析师团队</div>
+              <div class="desc">四位分析师并行研判，互不依赖</div>
+            </div>
+            <span class="tag">产出 · 四份独立报告</span>
+          </div>
+          <div class="g4">
+            <div class="chip"><strong>市场分析师</strong><em>技术与趋势</em></div>
+            <div class="chip"><strong>基本面分析师</strong><em>财务与估值</em></div>
+            <div class="chip"><strong>情绪分析师</strong><em>舆情与热度</em></div>
+            <div class="chip"><strong>新闻分析师</strong><em>事件与风险</em></div>
+          </div>
+        </section>
+
+        <section class="layer l2">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div class="hrow">
+            <div>
+              <div class="name">第二层 · 研究团队辩论</div>
+              <div class="desc">多空交锋后由研究经理综合裁决</div>
+            </div>
+            <span class="tag">产出 · 一份综合决策</span>
+          </div>
+          <div class="g2">
+            <div class="chip"><strong>多头研究员</strong><em>看涨论证</em></div>
+            <div class="chip"><strong>空头研究员</strong><em>看跌论证</em></div>
+          </div>
+          <div class="split"><i></i>双方辩论汇总<i></i></div>
+          <div class="judge"><strong>研究经理</strong><em>综合两方观点，给出投资判断</em></div>
+        </section>
+
+        <section class="layer l3">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div class="hrow">
+            <div>
+              <div class="name">第三层 · 交易团队</div>
+              <div class="desc">把研究结论落成可执行计划</div>
+            </div>
+            <span class="tag">产出 · 一份交易计划</span>
+          </div>
+          <div class="chip"><strong>交易员</strong><em>仓位、时机与止盈止损</em></div>
+        </section>
+
+        <section class="layer l4">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div class="hrow">
+            <div>
+              <div class="name">第四层 · 风险管理团队辩论</div>
+              <div class="desc">三方评估后由投资组合经理裁决</div>
+            </div>
+            <span class="tag">产出 · 一份风险管理决策</span>
+          </div>
+          <div class="g3">
+            <div class="chip"><strong>激进分析师</strong><em>进取观点</em></div>
+            <div class="chip"><strong>保守分析师</strong><em>风控观点</em></div>
+            <div class="chip"><strong>中性分析师</strong><em>平衡观点</em></div>
+          </div>
+          <div class="split"><i></i>三方辩论汇总<i></i></div>
+          <div class="judge"><strong>投资组合经理</strong><em>综合三方观点，确定风险等级</em></div>
+        </section>
+
+        <section class="layer l5">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div class="hrow">
+            <div>
+              <div class="name">第五层 · 最终决策</div>
+              <div class="desc">综合全部团队结论后给出执行意见</div>
+            </div>
+            <span class="tag">产出 · 一份最终交易决策</span>
+          </div>
+          <div class="judge"><strong>最终交易决策</strong><em>投资建议、置信度、风险等级与执行计划</em></div>
+        </section>
+      </div>
+    </div>
+    <p class="note">系统实际保存九份报告；研究决策与风险管理决策为综合报告，前端可按角色拆成十三项展示。</p>
+  </div>
+</body>
+</html>

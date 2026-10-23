@@ -1,24 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1420 640" font-family="'Microsoft YaHei','PingFang SC','Segoe UI',sans-serif">
   <defs>
     <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 Z" fill="#1f2937"/></marker>
-    <!-- 智能体图标：头部轮廓 + AI 芯片，绘制区域约 60x66 -->
+    <!-- 智能体图标：参照附件样式，圆角框内的侧脸与 AI 芯片，绘制区域 70x62 -->
     <g id="aiAgent">
-      <path d="M28 6 C14 6 6 18 6 32 C6 39 8 44 11 48 L11 58 L20 58 L20 66 L36 66 L36 58 L44 58 C44 50 42 44 38 40 L38 34 L52 34" fill="none" stroke="#1f2937" stroke-width="2" stroke-linecap="round"/>
-      <rect x="18" y="14" width="26" height="26" rx="4" fill="#1f2937"/>
-      <text x="31" y="32" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff">AI</text>
-      <line x1="18" y1="20" x2="12" y2="20" stroke="#1f2937" stroke-width="1.6"/>
-      <line x1="18" y1="32" x2="12" y2="32" stroke="#1f2937" stroke-width="1.6"/>
-      <line x1="44" y1="20" x2="50" y2="20" stroke="#1f2937" stroke-width="1.6"/>
-      <line x1="44" y1="32" x2="50" y2="32" stroke="#1f2937" stroke-width="1.6"/>
-      <line x1="24" y1="14" x2="24" y2="8" stroke="#1f2937" stroke-width="1.6"/>
-      <line x1="31" y1="14" x2="31" y2="8" stroke="#1f2937" stroke-width="1.6"/>
-      <line x1="38" y1="14" x2="38" y2="8" stroke="#1f2937" stroke-width="1.6"/>
+      <rect x="2" y="2" width="66" height="58" rx="8" fill="#fff" stroke="#1f2937" stroke-width="1.8"/>
+      <path d="M26 58 L26 50 C24 49 18 49 15 46 C12 43 11 41 10 37 C10 36 11 34 13 32 C11 26 13 18 19 13 C26 7 36 6 43 9 C52 13 55 20 55 28 C55 37 52 44 46 48 L46 58" fill="none" stroke="#1f2937" stroke-width="1.7" stroke-linecap="round"/>
+      <rect x="24" y="16" width="20" height="20" rx="2.5" fill="#1f2937"/>
+      <text x="34" y="30" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">AI</text>
+      <path d="M28 12 V16 M34 12 V16 M40 12 V16 M28 36 V40 M34 36 V40 M40 36 V40 M18 22 H24 M18 28 H24 M44 22 H50 M44 28 H50 M50 26 H64" fill="none" stroke="#1f2937" stroke-width="1.3" stroke-linecap="round"/>
     </g>
     <g id="sparkle"><path d="M10 0 L12 6 L18 8 L12 10 L10 16 L8 10 L2 8 L8 6 Z" fill="#1f2937"/></g>
   </defs>
 
   <!-- 标题 -->
-  <text x="710" y="36" text-anchor="middle" font-size="26" font-weight="bold" fill="#111827">TradingAgents-CN 一次股票分析的智能体协作流程</text>
+  <text x="710" y="36" text-anchor="middle" font-size="26" font-weight="bold" fill="#111827">一次股票分析的智能体协作流程</text>
   <text x="710" y="64" text-anchor="middle" font-size="14" fill="#6b7280">用户提交一次分析 → 最多 11 个 AI 角色按 4 个阶段接力协作 → 输出完整分析报告</text>
 
   <!-- 用户 -->
@@ -48,10 +43,10 @@
     <circle cx="256" cy="112" r="14" fill="#2563eb"/>
     <text x="256" y="117" text-anchor="middle" font-size="15" font-weight="bold" fill="#fff">1</text>
     <text x="370" y="118" text-anchor="middle" font-size="18" font-weight="bold" fill="#111827">分析师团队（1–4 人）</text>
-    <g transform="translate(281,136) scale(0.78)"><use href="#aiAgent"/></g>
-    <g transform="translate(411,136) scale(0.78)"><use href="#aiAgent"/></g>
-    <g transform="translate(281,216) scale(0.78)"><use href="#aiAgent"/></g>
-    <g transform="translate(411,216) scale(0.78)"><use href="#aiAgent"/></g>
+    <g transform="translate(275,133) scale(0.85)"><use href="#aiAgent"/></g>
+    <g transform="translate(405,133) scale(0.85)"><use href="#aiAgent"/></g>
+    <g transform="translate(275,212) scale(0.85)"><use href="#aiAgent"/></g>
+    <g transform="translate(405,212) scale(0.85)"><use href="#aiAgent"/></g>
     <text x="305" y="200" text-anchor="middle" font-size="12" fill="#1f2937">市场分析师</text>
     <text x="435" y="200" text-anchor="middle" font-size="12" fill="#1f2937">基本面分析师</text>
     <text x="305" y="280" text-anchor="middle" font-size="12" fill="#1f2937">新闻分析师</text>
@@ -66,14 +61,14 @@
     <circle cx="576" cy="112" r="14" fill="#2563eb"/>
     <text x="576" y="117" text-anchor="middle" font-size="15" font-weight="bold" fill="#fff">2</text>
     <text x="690" y="118" text-anchor="middle" font-size="18" font-weight="bold" fill="#111827">研究辩论（3 人）</text>
-    <g transform="translate(565,140) scale(0.78)"><use href="#aiAgent"/></g>
-    <g transform="translate(765,140) scale(0.78)"><use href="#aiAgent"/></g>
+    <g transform="translate(561,136) scale(0.8)"><use href="#aiAgent"/></g>
+    <g transform="translate(763,136) scale(0.8)"><use href="#aiAgent"/></g>
     <text x="589" y="204" text-anchor="middle" font-size="12" fill="#1f2937">看涨研究员</text>
     <text x="789" y="204" text-anchor="middle" font-size="12" fill="#1f2937">看跌研究员</text>
     <line x1="626" y1="152" x2="754" y2="152" stroke="#1f2937" stroke-width="1.6" marker-end="url(#arr)"/>
     <line x1="754" y1="170" x2="626" y2="170" stroke="#1f2937" stroke-width="1.6" marker-end="url(#arr)"/>
     <text x="690" y="142" text-anchor="middle" font-size="11" fill="#6b7280">往返辩论</text>
-    <g transform="translate(666,218) scale(0.78)"><use href="#aiAgent"/></g>
+    <g transform="translate(662,216) scale(0.8)"><use href="#aiAgent"/></g>
     <text x="690" y="282" text-anchor="middle" font-size="12" fill="#1f2937">研究经理（裁决 + 投资计划）</text>
     <text x="690" y="310" text-anchor="middle" font-size="12" fill="#6b7280">辩论轮次达到上限后，由研究经理收束结论</text>
   </g>
@@ -85,7 +80,7 @@
     <circle cx="896" cy="112" r="14" fill="#2563eb"/>
     <text x="896" y="117" text-anchor="middle" font-size="15" font-weight="bold" fill="#fff">3</text>
     <text x="965" y="118" text-anchor="middle" font-size="18" font-weight="bold" fill="#111827">交易员</text>
-    <g transform="translate(939,150) scale(0.85)"><use href="#aiAgent"/></g>
+    <g transform="translate(933,146) scale(0.9)"><use href="#aiAgent"/></g>
     <text x="965" y="232" text-anchor="middle" font-size="12" fill="#1f2937">把投资计划落成</text>
     <text x="965" y="250" text-anchor="middle" font-size="12" fill="#1f2937">买卖建议 · 目标价 · 置信度</text>
     <text x="965" y="310" text-anchor="middle" font-size="12" fill="#6b7280">固定 1 人</text>
@@ -98,14 +93,14 @@
     <circle cx="1126" cy="112" r="14" fill="#2563eb"/>
     <text x="1126" y="117" text-anchor="middle" font-size="15" font-weight="bold" fill="#fff">4</text>
     <text x="1240" y="118" text-anchor="middle" font-size="18" font-weight="bold" fill="#111827">风险管理（4 人）</text>
-    <g transform="translate(1129,140) scale(0.7)"><use href="#aiAgent"/></g>
-    <g transform="translate(1229,140) scale(0.7)"><use href="#aiAgent"/></g>
-    <g transform="translate(1329,140) scale(0.7)"><use href="#aiAgent"/></g>
+    <g transform="translate(1123,137) scale(0.78)"><use href="#aiAgent"/></g>
+    <g transform="translate(1223,137) scale(0.78)"><use href="#aiAgent"/></g>
+    <g transform="translate(1323,137) scale(0.78)"><use href="#aiAgent"/></g>
     <text x="1150" y="194" text-anchor="middle" font-size="12" fill="#1f2937">激进分析师</text>
     <text x="1250" y="194" text-anchor="middle" font-size="12" fill="#1f2937">保守分析师</text>
     <text x="1350" y="194" text-anchor="middle" font-size="12" fill="#1f2937">中性分析师</text>
     <text x="1240" y="212" text-anchor="middle" font-size="11" fill="#6b7280">三方轮流辩论，达到轮次上限后收口</text>
-    <g transform="translate(1216,222) scale(0.78)"><use href="#aiAgent"/></g>
+    <g transform="translate(1212,220) scale(0.8)"><use href="#aiAgent"/></g>
     <text x="1240" y="286" text-anchor="middle" font-size="12" fill="#1f2937">风险经理（最终决策）</text>
     <text x="1240" y="310" text-anchor="middle" font-size="11" fill="#6b7280">报告里的“投资组合经理”即此裁决</text>
   </g>
@@ -118,7 +113,7 @@
     <text x="1278" y="410" text-anchor="middle" font-size="15" font-weight="bold" fill="#1f2937">分析报告</text>
     <text x="1278" y="432" text-anchor="middle" font-size="11" fill="#6b7280">含最终交易决策</text>
   </g>
-  <path d="M1140 416 L640 416 L640 470 L132 470 L132 396" fill="none" stroke="#1f2937" stroke-width="1.8" marker-end="url(#arr)"/>
+  <line x1="1140" y1="386" x2="120" y2="386" stroke="#1f2937" stroke-width="1.8" marker-end="url(#arr)"/>
 
   <!-- 底部说明 -->
   <rect x="230" y="500" width="1150" height="110" rx="10" fill="#f9fafb" stroke="#e5e7eb" stroke-width="1.5"/>

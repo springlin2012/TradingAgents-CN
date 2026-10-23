@@ -1,6 +1,6 @@
 # TradingAgents-CN 项目知识库
 
-> 更新日期：2026-10-09  
+> 更新日期：2026-10-23  
 > 用途：按功能沉淀调用链，便于排障和二次开发。
 
 ## 功能目录
@@ -10,6 +10,7 @@
 | 1 | 根据股票代码查询股票名称 | 添加自选股时，A 股代码失焦后读本地库自动填名称 |
 | 2 | stock_basic_info 数据来源与同步 | A 股基础信息如何从 Tushare / AKShare / BaoStock 入库 |
 | 3 | A股名称模糊搜索与自动填充 | 输入名称片段，选择候选后同时填入名称和六位代码 |
+| 4 | Docker Compose 与 MongoDB / Redis | 一份 YAML 编排多容器；库是独立服务，不必在后端容器里手动安装 |
 
 ---
 
@@ -220,3 +221,108 @@ Favorites/index.vue 的 el-autocomplete
 - 构建：`npm run type-check`、`npm run build`；lint 使用 `npm run lint -- --no-fix --ignore-path ../.gitignore`，避免原脚本引用不存在的前端 `.gitignore`。本地补齐缺少的 `@rushstack/eslint-patch`，未修改依赖清单和锁文件。
 - 浏览器模拟服务：`tests/frontend/stock_name_ui_fixture.cjs`，使用内存股票和自选数据验证界面，不代表真实业务环境或数据覆盖率。
 - 实施设计与验收说明：[自选股名称模糊搜索实现方案](design/自选股名称模糊搜索实现方案_20261009.md)。未测真实库 P95；中文输入法组合输入依赖组件机制，尚未完成实机输入法验收。
+
+---
+
+## 功能 4：Docker Compose 与 MongoDB / Redis
+
+Docker Compose 把一套多容器应用写成一份 YAML，再用一条命令创建、联网、启动、停掉。单容器用 `docker run` 即可；本仓库是前后端分离 + MongoDB + Redis，端口、网络、启动顺序和环境变量都声明在项目配置里，不靠人手记。
+
+当前本地整套环境以仓库根目录 `docker-compose.yml` 为准。Kubernetes 适合多机、自愈、滚动发布；本仓库本机开发和单机部署走 Compose。
+
+### 4.1 使用场景
+
+- 一条命令拉起前端、后端、MongoDB、Redis
+- 容器之间用服务名互访，不必在后端镜像或 Windows 宿主机里再装数据库
+- 本机直接跑 `python -m app` 时，可以只起库容器，或改连云上的库
+
+### 4.2 编排关系
+
+```text
+docker-compose.yml
+  → Compose 引擎
+  → tradingagents-network
+      frontend   （Vue，宿主机 3000 → 容器 80）
+      backend    （FastAPI，宿主机 8000）
+      mongodb    （官方镜像 mongo:4.4）
+      redis      （官方镜像 redis:7-alpine）
+```
+
+启动顺序由 `depends_on` + `healthcheck` 约束，不是并行乱起：
+
+```text
+mongodb 健康 ─┐
+              ├─→ backend 健康 → frontend
+redis 健康  ─┘
+```
+
+`redis-commander`、`mongo-express` 打了 `profiles: [management]`，默认 `up` 不会启动；需要管理界面时再加 `--profile management`。
+
+### 4.3 YAML 关键字段（对照本仓库）
+
+| 字段 | 作用 | 本仓库实际值 |
+|---|---|---|
+| `services` | 要启动的容器清单 | 默认四件套：`backend`、`frontend`、`mongodb`、`redis` |
+| `depends_on` | 启动顺序与健康等待 | 库先健康 → 后端 → 前端 |
+| `networks` | 容器互相用服务名通信 | 全部挂在 `tradingagents-network`；后端连库用主机名 `mongodb` / `redis`，不写 `127.0.0.1` |
+| `volumes` | 数据落盘，删容器不丢 | 命名卷 `mongodb_data` / `redis_data`；`logs`、`config`、`data` 绑定挂载到仓库目录 |
+| `ports` | 映射到本机端口 | 前端 `3000:80`，后端 `8000:8000`，MongoDB `27017`，Redis `6379` |
+| `profiles` | 可选服务 | 管理界面默认不起 |
+
+每个 service 相当于一次带好参数的 `docker run`，但名字、网络、依赖写在同一份文件里。服务名就是容器内 DNS。
+
+### 4.4 MongoDB / Redis 要不要手动安装
+
+**走 `docker compose up` 时，Windows 本机和后端容器里都不必再装 MongoDB / Redis。** 它们是独立服务，不是装进后端镜像的系统包。
+
+| 位置 | 装什么 | 谁负责 |
+|---|---|---|
+| Windows 宿主机 | 只装 Docker Desktop | 使用者 |
+| `backend` 容器 | Python 客户端：`pymongo` / `motor` / `redis` | `Dockerfile.backend` + `pyproject.toml` |
+| `mongodb` / `redis` 容器 | 数据库服务本身 | Compose 拉官方镜像 `mongo:4.4`、`redis:7-alpine` |
+
+`Dockerfile.backend` 里没有 `apt-get install mongodb` / `redis`，也不该有：一个容器只跑一个进程。库和应用拆开，才能单独重启、单独扩容，数据落在 volume 上。
+
+Docker 内标准连接（见 `.env.docker`）：
+
+- MongoDB：`mongodb://admin:tradingagents123@mongodb:27017/tradingagentscn?authSource=admin`
+- Redis：`redis://:tradingagents123@redis:6379/0`
+
+这是容器内 DNS，不是本机回环地址。`docker-compose.yml` 的 `environment` 会覆盖 `env_file`；排障时以容器内实际环境变量为准。
+
+只有两种情况才需要自己准备库：
+
+1. **本机直接跑** `python -m app`（不用 Compose）  
+   要么本机安装 MongoDB / Redis，要么只起库：`docker compose up -d mongodb redis`，再连 `localhost:27017` / `localhost:6379`。
+2. **故意用云上的库**  
+   改连接串即可，Compose 里的 `mongodb` / `redis` 服务可以不启。
+
+### 4.5 常用命令
+
+```bash
+docker compose up --build
+docker compose ps
+docker compose logs -f backend
+docker compose down
+docker compose --profile management up -d
+```
+
+`down` 拆除容器和网络，命名卷默认还在，数据库不会跟着消失。
+
+### 4.6 相关文件
+
+| 层 | 文件 |
+|---|---|
+| 编排入口 | `docker-compose.yml` |
+| 后端镜像 | `Dockerfile.backend` |
+| 前端镜像 | `Dockerfile.frontend` |
+| Docker 环境变量 | `.env.docker` |
+| Python 客户端依赖 | `pyproject.toml`（`motor`、`pymongo`、`redis`） |
+| 部署说明 | `docs/deployment/docker/docker_deployment_guide.md` |
+| 库连接排障 | `docs/troubleshooting-mongodb-docker.md` |
+
+### 4.7 注意
+
+- 改 Compose 或 Dockerfile 后，本地 `python -m app` 不会吃到这些变更；要验证容器内行为必须重新 `docker compose up --build`。
+- 后端连库必须用服务名 `mongodb` / `redis`。在容器里写 `127.0.0.1` 会连到后端自己，而不是库容器。
+- 不要把 MongoDB / Redis 装进 `backend` 镜像。功能 1～3 读的 `stock_basic_info` 等集合，落在 `mongodb` 容器的命名卷上。
