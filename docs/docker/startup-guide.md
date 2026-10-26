@@ -10,6 +10,9 @@ docker-compose up -d
 
 # 首次启动或代码变更 - 重新构建镜像
 docker-compose up -d --build
+
+# 启动 backend 服务，输出日志
+docker-compose logs backend --tail=100
 ```
 
 ### 🧠 智能启动（推荐）
