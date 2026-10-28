@@ -80,11 +80,19 @@ mongodump \
   --gzip
 ```
 
+```bash
+mongodump --uri="mongodb://admin:123456@192.168.66.76:27017/tradingagents?authSource=admin"  --out="D:\workSpace\TradingAgents-CN\backup" --gzip
+  
+mongodump --uri="mongodb://admin:123456@192.168.66.76:27017/tradingagentscn?authSource=admin" --out="D:\workSpace\TradingAgents-CN\backup" --gzip
+```
+
 **参数说明**：
 - `--uri`：MongoDB 连接字符串
 - `--db`：数据库名称
 - `--out`：备份输出目录
 - `--gzip`：启用 gzip 压缩（推荐）
+
+备份目录下能看到 *.bson.gz 和 *.metadata.json 表示备份成功。
 
 ### 备份特定集合
 
