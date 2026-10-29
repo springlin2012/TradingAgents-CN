@@ -73,14 +73,6 @@ mongorestore --version
 备份整个数据库：
 
 ```bash
-mongodump \
-  --uri="mongodb://localhost:27017" \
-  --db=tradingagents \
-  --out=./backup \
-  --gzip
-```
-
-```bash
 mongodump --uri="mongodb://admin:123456@192.168.66.76:27017/tradingagents?authSource=admin"  --out="D:\workSpace\TradingAgents-CN\backup" --gzip
   
 mongodump --uri="mongodb://admin:123456@192.168.66.76:27017/tradingagentscn?authSource=admin" --out="D:\workSpace\TradingAgents-CN\backup" --gzip
@@ -170,6 +162,11 @@ mongorestore \
   --db=tradingagents \
   --gzip \
   ./backup/tradingagents
+  
+# 执行示例
+mongorestore --uri="mongodb://admin:${密码}@${IP}:27017/tradingagentscn?authSource=admin" --db=tradingagentscn --gzip  ./backup/tradingagentscn  --nsExclude="tradingagentscn.users"
+
+mongorestore --uri="mongodb://admin:${密码}@${IP}:27017/tradingagents?authSource=admin" --db=tradingagents --gzip  ./backup/tradingagents
 ```
 
 **⚠️ 警告**：此操作会**覆盖**现有数据！
