@@ -80,7 +80,7 @@ services:
       # - ./config:/app/config
       - ./data:/app/data
     env_file:
-      - .env
+      - .env.docker
     environment:
       TZ: "Asia/Shanghai"
       TRADINGAGENTS_LOG_LEVEL: "INFO"
