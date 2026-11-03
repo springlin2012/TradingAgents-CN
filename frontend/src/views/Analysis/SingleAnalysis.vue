@@ -226,6 +226,9 @@
                     重新分析
                   </el-button>
                 </div>
+                <div v-if="quotaStatus" class="quota-hint" style="margin-top: 12px; font-size: 13px; color: var(--el-text-color-secondary);">
+                  今日剩余分析额度：{{ quotaStatus.remaining }} / {{ quotaStatus.limit }}
+                </div>
               </div>
 
               <!-- 分析进度显示 -->
@@ -705,7 +708,7 @@ import {
   QuestionFilled,
   ArrowDown,
 } from '@element-plus/icons-vue'
-import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
+import { analysisApi, createIdempotencyKey, type SingleAnalysisRequest, type QuotaStatus } from '@/api/analysis'
 import { paperApi } from '@/api/paper'
 import { stocksApi } from '@/api/stocks'
 import { useAppStore } from '@/stores/app'
@@ -746,6 +749,23 @@ const router = useRouter()
 const route = useRoute()
 
 const submitting = ref(false)
+// 分析提交幂等键：同一次提交的重试必须复用同一个键，成功后重置
+const submitIdempotencyKey = ref<string | null>(null)
+
+// 当日分析额度
+const quotaStatus = ref<QuotaStatus | null>(null)
+const loadQuota = async () => {
+  try {
+    const res = await analysisApi.getQuota()
+    if (res?.success && res.data?.enabled) {
+      quotaStatus.value = res.data
+    } else {
+      quotaStatus.value = null
+    }
+  } catch {
+    quotaStatus.value = null
+  }
+}
 
 // 分析进度和结果相关状态
 const currentTaskId = ref('')
@@ -952,7 +972,10 @@ const submitAnalysis = async () => {
       }
     }
 
-    const response = await analysisApi.startSingleAnalysis(request)
+    if (!submitIdempotencyKey.value) {
+      submitIdempotencyKey.value = createIdempotencyKey()
+    }
+    const response = await analysisApi.startSingleAnalysis(request, submitIdempotencyKey.value)
 
     console.log('🔍 分析响应数据:', response)
     console.log('🔍 响应数据结构:', response.data)
@@ -969,6 +992,8 @@ const submitAnalysis = async () => {
       return
     }
 
+    submitIdempotencyKey.value = null
+    loadQuota()
     console.log('✅ 任务ID设置成功:', currentTaskId.value)
 
     // 保存任务状态到缓存
@@ -2187,6 +2212,7 @@ watch([() => modelSettings.value.quickAnalysisModel, () => modelSettings.value.d
 
 // 页面初始化
 onMounted(async () => {
+  loadQuota()
   initializeModelSettings()
 
   // 🆕 从用户偏好加载默认设置

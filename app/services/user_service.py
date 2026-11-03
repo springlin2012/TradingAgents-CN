@@ -371,11 +371,7 @@ class UserService:
             if user_data.preferences:
                 update_data["preferences"] = user_data.preferences.model_dump()
             
-            if user_data.daily_quota is not None:
-                update_data["daily_quota"] = user_data.daily_quota
-            
-            if user_data.concurrent_limit is not None:
-                update_data["concurrent_limit"] = user_data.concurrent_limit
+            # daily_quota / concurrent_limit 属于管理员控制字段，普通用户更新路径不再透传
 
             if user_data.nickname is not None:
                 update_data["nickname"] = user_data.nickname.strip()
@@ -398,6 +394,24 @@ class UserService:
             logger.error(f"❌ 更新用户信息失败: {e}")
             return None
     
+    def update_daily_quota(self, username: str, daily_quota: int) -> Optional[Dict[str, int]]:
+        """管理员修改用户每日分析额度。
+
+        Returns:
+            {"old_quota": int, "new_quota": int}；用户不存在返回 None
+        """
+        if not isinstance(daily_quota, int) or isinstance(daily_quota, bool) or daily_quota < 0:
+            raise ValueError("daily_quota 必须是非负整数")
+        user_doc = self.users_collection.find_one({"username": username}, {"daily_quota": 1})
+        if not user_doc:
+            return None
+        old_quota = user_doc.get("daily_quota", 0)
+        self.users_collection.update_one(
+            {"username": username},
+            {"$set": {"daily_quota": daily_quota, "updated_at": datetime.utcnow()}},
+        )
+        logger.info(f"✅ 用户每日额度已修改: {username} {old_quota} -> {daily_quota}")
+        return {"old_quota": old_quota, "new_quota": daily_quota}
     async def change_password(self, username: str, old_password: str, new_password: str) -> bool:
         """修改密码"""
         try:
@@ -585,3 +599,4 @@ class UserService:
 
 # 全局用户服务实例
 user_service = UserService()
+

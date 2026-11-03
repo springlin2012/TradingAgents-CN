@@ -90,8 +90,8 @@ class User(BaseModel):
     preferences: UserPreferences = Field(default_factory=UserPreferences)
     
     # 配额和限制
-    daily_quota: int = 1000
-    concurrent_limit: int = 3
+    daily_quota: int = Field(default=1000, ge=0)
+    concurrent_limit: int = Field(default=3, ge=0)
     
     # 统计信息
     total_analyses: int = 0
@@ -117,8 +117,12 @@ class UserUpdate(BaseModel):
     nickname: Optional[str] = Field(None, min_length=1, max_length=32)
     avatar: Optional[str] = None
     preferences: Optional[UserPreferences] = None
-    daily_quota: Optional[int] = None
-    concurrent_limit: Optional[int] = None
+
+
+class UserQuotaUpdate(BaseModel):
+    """管理员修改用户每日额度请求模型"""
+    daily_quota: int = Field(..., ge=0)
+    reason: Optional[str] = Field(default=None, max_length=200)
 
 
 class UserResponse(BaseModel):
@@ -176,3 +180,4 @@ class TokenResponse(BaseModel):
     expires_in: int
     refresh_token: Optional[str] = None
     user: UserResponse
+

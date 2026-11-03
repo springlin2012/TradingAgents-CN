@@ -150,6 +150,12 @@ class Settings(BaseSettings):
     GLOBAL_CONCURRENT_LIMIT: int = Field(default=50)
     DEFAULT_DAILY_QUOTA: int = Field(default=1000)
 
+    # 每日分析额度控制
+    # disabled: 不启用（默认）；observe: 记录账本并放行超额请求；enforce: 超额拒绝
+    QUOTA_MODE: str = Field(default="disabled")
+    QUOTA_BUSINESS_TZ: str = Field(default="Asia/Shanghai")
+    QUOTA_RESERVED_TTL_MINUTES: int = Field(default=30)
+
     # 速率限制
     RATE_LIMIT_ENABLED: bool = Field(default=True)
     DEFAULT_RATE_LIMIT: int = Field(default=100)  # 每分钟请求数
@@ -394,3 +400,4 @@ if settings.NO_PROXY:
 def get_settings() -> Settings:
     """获取配置实例"""
     return settings
+

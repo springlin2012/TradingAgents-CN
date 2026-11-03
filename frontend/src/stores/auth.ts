@@ -102,8 +102,8 @@ export const useAuthStore = defineStore('auth', {
         totalAnalyses: this.user?.total_analyses || 0,
         successfulAnalyses: this.user?.successful_analyses || 0,
         failedAnalyses: this.user?.failed_analyses || 0,
-        dailyQuota: this.user?.daily_quota || 1000,
-        concurrentLimit: this.user?.concurrent_limit || 3
+        dailyQuota: this.user?.daily_quota ?? 1000,
+        concurrentLimit: this.user?.concurrent_limit ?? 3
       }
     }
   },

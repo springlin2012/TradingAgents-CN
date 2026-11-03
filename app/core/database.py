@@ -369,6 +369,14 @@ async def create_database_indexes(db):
         index_ingestion_status = db["index_ingestion_status"]
         await index_ingestion_status.create_index([("job", 1)], unique=True)
 
+        # 每日分析额度账本
+        quota_daily = db["analysis_quota_daily"]
+        await quota_daily.create_index(
+            [("user_id", 1), ("business_date", 1)],
+            unique=True, name="uk_user_business_date",
+        )
+        await quota_daily.create_index("entries.task_ids", name="idx_task_ids")
+
         logger.info("✅ 数据库索引创建完成")
 
     except Exception as e:

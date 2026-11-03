@@ -4,6 +4,32 @@
  */
 
 import { request, type ApiResponse } from './request'
+import type { RequestConfig } from './request'
+
+/** 生成分析提交幂等键（同一次提交的重试必须复用同一键） */
+export const createIdempotencyKey = (): string => {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+  return 'idem_' + Date.now() + '_' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+}
+
+const idempotencyHeader = (key?: string): RequestConfig | undefined =>
+  key ? ({ headers: { 'Idempotency-Key': key } } as RequestConfig) : undefined
+
+/** 每日额度状态 */
+export interface QuotaStatus {
+  limit: number
+  reserved: number
+  succeeded: number
+  released: number
+  occupied: number
+  remaining: number
+  business_date: string
+  resets_at: string
+  enabled: boolean
+  mode: string
+}
 
 // 分析相关类型定义
 export interface AnalysisRequest {
@@ -123,8 +149,8 @@ export const analysisApi = {
   },
 
   // 开始单股分析（使用后端期望的格式）
-  startSingleAnalysis(analysisRequest: SingleAnalysisRequest): Promise<ApiResponse<any>> {
-    return request.post('/api/analysis/single', analysisRequest)
+  startSingleAnalysis(analysisRequest: SingleAnalysisRequest, idempotencyKey?: string): Promise<ApiResponse<any>> {
+    return request.post('/api/analysis/single', analysisRequest, idempotencyHeader(idempotencyKey))
   },
 
   // 获取任务状态
@@ -181,8 +207,8 @@ export const analysisApi = {
     symbols?: string[]  // 主字段：股票代码列表
     stock_codes?: string[]  // 兼容字段（已废弃）
     parameters?: SingleAnalysisRequest['parameters']
-  }): Promise<ApiResponse<{ batch_id: string; total_tasks: number; task_ids: string[]; mapping?: any[]; status: string }>>{
-    return request.post('/api/analysis/batch', batchRequest)
+  }, idempotencyKey?: string): Promise<ApiResponse<{ batch_id: string; total_tasks: number; task_ids: string[]; mapping?: any[]; status: string }>> {
+    return request.post('/api/analysis/batch', batchRequest, idempotencyHeader(idempotencyKey))
   },
 
   // 获取批次详情（兼容原有队列接口，若后续需要）
@@ -297,7 +323,13 @@ export const analysisApi = {
     }>
   }> {
     return request.get('/api/analysis/stats', { params })
+  },
+
+  // 查询当前用户当日分析额度
+  getQuota(): Promise<ApiResponse<QuotaStatus>> {
+    return request.get('/api/analysis/quota')
   }
+}
 }
 
 // 分析相关的常量

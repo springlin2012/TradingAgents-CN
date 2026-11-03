@@ -3,7 +3,7 @@
 增强版本，支持优先级、进度跟踪、任务管理等功能
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, WebSocket, WebSocketDisconnect, Header
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -17,6 +17,15 @@ from app.services.queue_service import get_queue_service, QueueService
 from app.services.analysis_service import get_analysis_service
 from app.services.simple_analysis_service import get_simple_analysis_service
 from app.services.websocket_manager import get_websocket_manager
+from app.services.analysis_quota_service import (
+    get_quota_service,
+    MODE_OBSERVE,
+    QuotaExceededError,
+    QuotaConfigError,
+    QuotaUnavailableError,
+    UnknownWriteResultError,
+    IdempotencyConflictError,
+)
 from app.models.analysis import (
     SingleAnalysisRequest, BatchAnalysisRequest, AnalysisParameters,
     AnalysisTaskResponse, AnalysisBatchResponse, AnalysisHistoryQuery
@@ -24,6 +33,106 @@ from app.models.analysis import (
 
 router = APIRouter()
 logger = logging.getLogger("webapi")
+
+
+# ==================== 每日分析额度准入 ====================
+
+def _require_idempotency_key(idempotency_key: Optional[str]) -> str:
+    """校验幂等键；enforce/observe 模式下必填。"""
+    if not idempotency_key or not idempotency_key.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "IDEMPOTENCY_KEY_REQUIRED",
+                    "message": "缺少 Idempotency-Key 请求头"},
+        )
+    key = idempotency_key.strip()
+    if len(key) > 128:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "IDEMPOTENCY_KEY_INVALID",
+                    "message": "Idempotency-Key 过长"},
+        )
+    return key
+
+
+async def _quota_reserve(
+    user_id: str,
+    endpoint: str,
+    symbols: List[str],
+    parameters: Any,
+    idempotency_key: Optional[str],
+):
+    """统一额度预占入口。
+
+    返回 (reservation, task_ids)；QUOTA_MODE=disabled 时返回 (None, 预生成task_ids)。
+    """
+    qs = get_quota_service()
+    cost = len(symbols)
+    task_ids = [qs.new_task_id() for _ in range(cost)]
+
+    if not qs.enabled():
+        return None, task_ids
+
+    key = _require_idempotency_key(idempotency_key)
+    params_dict = parameters.model_dump() if hasattr(parameters, "model_dump") else (parameters or {})
+    req_hash = qs.request_hash({
+        "endpoint": endpoint,
+        "symbols": symbols,
+        "parameters": params_dict,
+    })
+
+    try:
+        res = await qs.reserve(
+            user_id=user_id,
+            idempotency_key=key,
+            request_hash=req_hash,
+            cost=cost,
+            task_ids=task_ids,
+            force=(qs.mode() == MODE_OBSERVE),
+        )
+    except QuotaExceededError as e:
+        raise HTTPException(status_code=429, detail=e.detail)
+    except IdempotencyConflictError as e:
+        raise HTTPException(status_code=409, detail={"code": "IDEMPOTENCY_CONFLICT", "message": str(e)})
+    except QuotaConfigError as e:
+        logger.error(f"用户额度配置非法: {e}")
+        raise HTTPException(status_code=503, detail={"code": "QUOTA_CONFIG_INVALID", "message": "额度配置异常"})
+    except (QuotaUnavailableError, UnknownWriteResultError) as e:
+        logger.error(f"额度账本不可用: {e}")
+        raise HTTPException(status_code=503, detail={"code": "QUOTA_UNAVAILABLE", "message": "额度服务暂时不可用，请重试"})
+
+    return res, list(res.task_ids)
+
+
+def _quota_meta(res) -> dict:
+    return {
+        "submission_id": res.submission_id,
+        "business_date": res.business_date,
+        "cost": res.cost,
+    }
+
+
+async def _quota_release_on_failure(res, user_id: str):
+    """预占成功但任务创建失败时释放（幂等）。"""
+    if res is None or res.replayed:
+        return
+    try:
+        await get_quota_service().release_all(
+            res.submission_id, user_id, res.business_date
+        )
+    except Exception as e:
+        logger.error(f"释放额度失败 submission={res.submission_id}: {e}")
+
+
+def _dedup_symbols(symbols: List[str]) -> List[str]:
+    """批量标的规范化去重（保留顺序）。"""
+    seen, result = set(), []
+    for s in symbols or []:
+        code = str(s).strip().upper()
+        if code and code not in seen:
+            seen.add(code)
+            result.append(code)
+    return result
 
 # 兼容性：保留原有的请求模型
 class SingleAnalyzeRequest(BaseModel):
@@ -41,17 +150,37 @@ class BatchAnalyzeRequest(BaseModel):
 async def submit_single_analysis(
     request: SingleAnalysisRequest,
     background_tasks: BackgroundTasks,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(get_current_user),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
     """提交单股分析任务 - 使用 BackgroundTasks 异步执行"""
+    reservation = None
     try:
         logger.info(f"🎯 收到单股分析请求")
         logger.info(f"👤 用户信息: {user}")
         logger.info(f"📊 请求数据: {request}")
 
+        symbol = request.get_symbol()
+        if not symbol:
+            raise HTTPException(status_code=400, detail="股票代码不能为空")
+
+        # 每日额度准入（单股 cost=1）
+        reservation, task_ids = await _quota_reserve(
+            user["id"], "/api/analysis/single", [symbol],
+            request.parameters, idempotency_key,
+        )
+
         # 立即创建任务记录并返回，不等待执行完成
         analysis_service = get_simple_analysis_service()
-        result = await analysis_service.create_analysis_task(user["id"], request)
+        try:
+            result = await analysis_service.create_analysis_task(
+                user["id"], request,
+                task_id=task_ids[0],
+                quota_meta=_quota_meta(reservation) if reservation else None,
+            )
+        except Exception:
+            await _quota_release_on_failure(reservation, user["id"])
+            raise
 
         # 提取变量，避免闭包问题
         task_id = result["task_id"]
@@ -90,12 +219,30 @@ async def submit_single_analysis(
             "data": result,
             "message": "分析任务已在后台启动"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ 提交单股分析任务失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
 # 测试路由 - 验证路由是否被正确注册
+@router.get("/quota", response_model=Dict[str, Any])
+async def get_my_quota(user: dict = Depends(get_current_user)):
+    """查询当前用户当日分析额度状态"""
+    try:
+        status = await get_quota_service().get_status(user["id"])
+        return {"success": True, "data": status.model_dump()}
+    except QuotaConfigError as e:
+        logger.error(f"用户额度配置非法: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "QUOTA_CONFIG_INVALID", "message": "额度配置异常"},
+        )
+    except Exception as e:
+        logger.error(f"查询额度状态失败: {e}")
+        raise HTTPException(status_code=500, detail="查询额度状态失败")
+
 @router.get("/test-route")
 async def test_route():
     """测试路由是否工作"""
@@ -771,13 +918,15 @@ async def list_user_tasks(
 @router.post("/batch", response_model=Dict[str, Any])
 async def submit_batch_analysis(
     request: BatchAnalysisRequest,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(get_current_user),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
     """提交批量分析任务（真正的并发执行）
 
     ⚠️ 注意：不使用 BackgroundTasks，因为它是串行执行的！
     改用 asyncio.create_task 实现真正的并发执行。
     """
+    reservation = None
     try:
         logger.info(f"🎯 [批量分析] 收到批量分析请求: title={request.title}")
 
@@ -786,9 +935,9 @@ async def submit_batch_analysis(
         task_ids: List[str] = []
         mapping: List[Dict[str, str]] = []
 
-        # 获取股票代码列表 (兼容旧字段)
-        stock_symbols = request.get_symbols()
-        logger.info(f"📊 [批量分析] 股票代码列表: {stock_symbols}")
+        # 获取股票代码列表 (兼容旧字段) 并规范化去重
+        stock_symbols = _dedup_symbols(request.get_symbols())
+        logger.info(f"📊 [批量分析] 股票代码列表(去重后): {stock_symbols}")
 
         # 验证股票代码列表
         if not stock_symbols:
@@ -799,7 +948,13 @@ async def submit_batch_analysis(
         if len(stock_symbols) > MAX_BATCH_SIZE:
             raise ValueError(f"批量分析最多支持 {MAX_BATCH_SIZE} 个股票，当前提交了 {len(stock_symbols)} 个")
 
-        # 为每只股票创建单股分析任务
+        # 每日额度准入（按去重后标的数量计费，不足整批拒绝）
+        reservation, task_ids = await _quota_reserve(
+            user["id"], "/api/analysis/batch", stock_symbols,
+            request.parameters, idempotency_key,
+        )
+
+        # 为每只股票创建单股分析任务（使用准入时固定的 task_id）
         for i, symbol in enumerate(stock_symbols):
             logger.info(f"📝 [批量分析] 正在创建第 {i+1}/{len(stock_symbols)} 个任务: {symbol}")
 
@@ -810,7 +965,11 @@ async def submit_batch_analysis(
             )
 
             try:
-                create_res = await simple_service.create_analysis_task(user["id"], single_req)
+                create_res = await simple_service.create_analysis_task(
+                    user["id"], single_req,
+                    task_id=task_ids[i],
+                    quota_meta=_quota_meta(reservation) if reservation else None,
+                )
                 task_id = create_res.get("task_id")
                 if not task_id:
                     raise RuntimeError(f"创建任务失败：未返回task_id (symbol={symbol})")
@@ -819,6 +978,7 @@ async def submit_batch_analysis(
                 logger.info(f"✅ [批量分析] 已创建任务: {task_id} - {symbol}")
             except Exception as create_error:
                 logger.error(f"❌ [批量分析] 创建任务失败: {symbol}, 错误: {create_error}", exc_info=True)
+                await _quota_release_on_failure(reservation, user["id"])
                 raise
 
         # 🔧 使用 asyncio.create_task 实现真正的并发执行
@@ -867,6 +1027,8 @@ async def submit_batch_analysis(
             },
             "message": f"批量分析任务已提交，共{len(task_ids)}个股票，正在并发执行"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ [批量分析] 提交失败: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
@@ -876,16 +1038,30 @@ async def submit_batch_analysis(
 async def analyze_single(
     req: SingleAnalyzeRequest,
     user: dict = Depends(get_current_user),
-    svc: QueueService = Depends(get_queue_service)
+    svc: QueueService = Depends(get_queue_service),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
     """单股分析（兼容性端点）"""
+    reservation = None
     try:
-        task_id = await svc.enqueue_task(
-            user_id=user["id"],
-            symbol=req.symbol,
-            params=req.parameters
+        reservation, task_ids = await _quota_reserve(
+            user["id"], "/api/analysis/analyze", [req.symbol],
+            req.parameters, idempotency_key,
         )
+        try:
+            task_id = await svc.enqueue_task(
+                user_id=user["id"],
+                symbol=req.symbol,
+                params=req.parameters,
+                task_id=task_ids[0],
+                quota_meta=_quota_meta(reservation) if reservation else None,
+            )
+        except Exception:
+            await _quota_release_on_failure(reservation, user["id"])
+            raise
         return {"task_id": task_id, "status": "queued"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -893,16 +1069,34 @@ async def analyze_single(
 async def analyze_batch(
     req: BatchAnalyzeRequest,
     user: dict = Depends(get_current_user),
-    svc: QueueService = Depends(get_queue_service)
+    svc: QueueService = Depends(get_queue_service),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
     """批量分析（兼容性端点）"""
+    reservation = None
     try:
-        batch_id, submitted = await svc.create_batch(
-            user_id=user["id"],
-            symbols=req.symbols,
-            params=req.parameters
+        symbols = _dedup_symbols(req.symbols)
+        if not symbols:
+            raise HTTPException(status_code=400, detail="股票代码列表不能为空")
+
+        reservation, task_ids = await _quota_reserve(
+            user["id"], "/api/analysis/analyze/batch", symbols,
+            req.parameters, idempotency_key,
         )
+        try:
+            batch_id, submitted = await svc.create_batch(
+                user_id=user["id"],
+                symbols=symbols,
+                params=req.parameters,
+                task_ids=task_ids,
+                quota_meta=_quota_meta(reservation) if reservation else None,
+            )
+        except Exception:
+            await _quota_release_on_failure(reservation, user["id"])
+            raise
         return {"batch_id": batch_id, "submitted": submitted}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1204,6 +1398,17 @@ async def mark_task_as_failed(
             }
         )
 
+        # 每日额度：手动标记失败视为终态，释放预占（幂等）
+        try:
+            from app.services.analysis_quota_service import (
+                get_quota_service, OUTCOME_RELEASED,
+            )
+            qs = get_quota_service()
+            if qs.enabled():
+                await qs.settle(task_id, OUTCOME_RELEASED)
+        except Exception as quota_err:
+            logger.warning(f"额度释放失败(忽略) {task_id}: {quota_err}")
+
         if result.modified_count > 0:
             logger.info(f"✅ 任务 {task_id} 已标记为失败")
             return {
@@ -1239,6 +1444,21 @@ async def delete_task(
         # 从 MongoDB 中删除任务
         from app.core.database import get_mongo_db
         db = get_mongo_db()
+
+        # 删除前若任务未达终态，先释放其额度预占（幂等）
+        try:
+            task_doc = await db.analysis_tasks.find_one(
+                {"task_id": task_id}, {"status": 1}
+            )
+            if task_doc and task_doc.get("status") in ("pending", "processing", "running"):
+                from app.services.analysis_quota_service import (
+                    get_quota_service, OUTCOME_RELEASED,
+                )
+                qs = get_quota_service()
+                if qs.enabled():
+                    await qs.settle(task_id, OUTCOME_RELEASED)
+        except Exception as quota_err:
+            logger.warning(f"删除任务时额度释放失败(忽略) {task_id}: {quota_err}")
 
         result = await db.analysis_tasks.delete_one({"task_id": task_id})
 

@@ -287,19 +287,18 @@ const createAxiosInstance = (): AxiosInstance => {
             if (!config?.skipErrorHandler) showErrorMessage('请求的资源不存在')
             break
 
-          case 429:
-            if (!config?.skipErrorHandler) showErrorMessage('请求过于频繁，请稍后重试')
+          case 429: {
+            if (!config?.skipErrorHandler) {
+              const detail = (data as any)?.detail
+              if (detail?.code === 'DAILY_QUOTA_EXCEEDED') {
+                const resetsAt = detail.resets_at ? String(detail.resets_at).slice(0, 16).replace('T', ' ') : ''
+                showErrorMessage('今日分析额度已用完' + (detail.limit != null ? '（' + detail.limit + ' 次/日）' : '') + (resetsAt ? '，将于 ' + resetsAt + ' 重置' : '，次日重置'))
+              } else {
+                showErrorMessage('请求过于频繁，请稍后重试')
+              }
+            }
             break
-
-          case 500:
-            if (!config?.skipErrorHandler) showErrorMessage('服务器内部错误，请稍后重试')
-            break
-
-          case 502:
-          case 503:
-          case 504:
-            if (!config?.skipErrorHandler) showErrorMessage('服务暂时不可用，请稍后重试')
-            break
+          }
 
           default:
             if (!config?.skipErrorHandler) {

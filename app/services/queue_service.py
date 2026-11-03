@@ -56,7 +56,9 @@ class QueueService:
         user_id: str,
         symbol: str,
         params: Dict[str, Any],
-        batch_id: Optional[str] = None
+        batch_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        quota_meta: Optional[Dict[str, Any]] = None
     ) -> str:
         """任务入队，支持并发控制（开源版FIFO队列）"""
 
@@ -68,7 +70,7 @@ class QueueService:
         if not await self._check_global_concurrent_limit():
             raise ValueError(f"系统达到全局并发限制 ({self.global_concurrent_limit})")
 
-        task_id = str(uuid.uuid4())
+        task_id = task_id or str(uuid.uuid4())
         key = TASK_PREFIX + task_id
         now = int(time.time())
 
@@ -84,6 +86,11 @@ class QueueService:
 
         if batch_id:
             mapping["batch_id"] = batch_id
+
+        if quota_meta:
+            mapping["quota_submission_id"] = str(quota_meta.get("submission_id") or "")
+            mapping["quota_business_date"] = str(quota_meta.get("business_date") or "")
+            mapping["quota_cost"] = str(quota_meta.get("cost", 1))
 
         # 保存任务数据
         await self.r.hset(key, mapping=mapping)
@@ -169,6 +176,18 @@ class QueueService:
             else:
                 await self.r.sadd(SET_FAILED, task_id)
 
+            # 每日额度结算（幂等；queue 路径任务）
+            try:
+                from app.services.analysis_quota_service import (
+                    get_quota_service, OUTCOME_SUCCEEDED, OUTCOME_RELEASED,
+                )
+                qs = get_quota_service()
+                if qs.enabled():
+                    outcome = OUTCOME_SUCCEEDED if success else OUTCOME_RELEASED
+                    await qs.settle(task_id, outcome)
+            except Exception as quota_err:
+                logger.warning(f"额度结算失败(忽略) {task_id}: {quota_err}")
+
             logger.info(f"任务已确认: {task_id} (成功: {success})")
             return True
 
@@ -176,7 +195,14 @@ class QueueService:
             logger.error(f"确认任务失败: {e}")
             return False
 
-    async def create_batch(self, user_id: str, symbols: List[str], params: Dict[str, Any]) -> tuple[str, int]:
+    async def create_batch(
+        self,
+        user_id: str,
+        symbols: List[str],
+        params: Dict[str, Any],
+        task_ids: Optional[List[str]] = None,
+        quota_meta: Optional[Dict[str, Any]] = None
+    ) -> tuple[str, int]:
         batch_id = str(uuid.uuid4())
         now = int(time.time())
         batch_key = BATCH_PREFIX + batch_id
@@ -187,8 +213,12 @@ class QueueService:
             "submitted": str(len(symbols)),
             "created_at": str(now),
         })
-        for s in symbols:
-            await self.enqueue_task(user_id=user_id, symbol=s, params=params, batch_id=batch_id)
+        for i, s in enumerate(symbols):
+            fixed_id = task_ids[i] if task_ids and i < len(task_ids) else None
+            await self.enqueue_task(
+                user_id=user_id, symbol=s, params=params,
+                batch_id=batch_id, task_id=fixed_id, quota_meta=quota_meta,
+            )
         return batch_id, len(symbols)
 
     async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
@@ -351,6 +381,17 @@ class QueueService:
                 "status": "cancelled",
                 "cancelled_at": str(int(time.time()))
             })
+
+            # 每日额度：取消后释放预占（任务已被移出队列/处理集合，幂等）
+            try:
+                from app.services.analysis_quota_service import (
+                    get_quota_service, OUTCOME_RELEASED,
+                )
+                qs = get_quota_service()
+                if qs.enabled():
+                    await qs.settle(task_id, OUTCOME_RELEASED)
+            except Exception as quota_err:
+                logger.warning(f"额度释放失败(忽略) {task_id}: {quota_err}")
 
             logger.info(f"任务已取消: {task_id}")
             return True

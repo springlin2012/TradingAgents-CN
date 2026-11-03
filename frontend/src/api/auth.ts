@@ -53,5 +53,12 @@ export const authApi = {
 
   // 验证邮箱
   verifyEmail: (token: string) =>
-    ApiClient.post('/api/auth/verify-email', { token })
+    ApiClient.post('/api/auth/verify-email', { token }),
+
+  // 管理员修改用户每日分析额度
+  updateUserDailyQuota: (username: string, dailyQuota: number, reason?: string) =>
+    ApiClient.put('/api/auth/users/' + encodeURIComponent(username) + '/daily-quota', {
+      daily_quota: dailyQuota,
+      reason: reason || ''
+    })
 }

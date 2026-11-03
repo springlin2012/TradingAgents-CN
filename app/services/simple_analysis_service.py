@@ -857,12 +857,21 @@ class SimpleAnalysisService:
         return trading_graph
 
     async def create_analysis_task(
-        self, user_id: str, request: SingleAnalysisRequest
+        self,
+        user_id: str,
+        request: SingleAnalysisRequest,
+        task_id: str | None = None,
+        quota_meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """创建分析任务（立即返回，不执行分析）"""
+        """创建分析任务（立即返回，不执行分析）
+
+        task_id: 可选的固定任务ID（额度预占时由准入层生成），不传则随机生成。
+        quota_meta: 额度关联信息 {"submission_id","business_date","cost"}，
+                    写入任务文档的 quota_* 字段。
+        """
         try:
-            # 生成任务ID
-            task_id = str(uuid.uuid4())
+            # 生成任务ID（支持准入层预生成，保证幂等恢复可用）
+            task_id = task_id or str(uuid.uuid4())
 
             # 🔧 使用 get_symbol() 方法获取股票代码（兼容 symbol 和 stock_code 字段）
             stock_code = request.get_symbol()
@@ -906,20 +915,24 @@ class SimpleAnalysisService:
 
             try:
                 db = get_mongo_db()
+                insert_doc = {
+                    "task_id": task_id,
+                    "user_id": user_id,
+                    "stock_code": code,
+                    "stock_symbol": code,
+                    "stock_name": name,
+                    "status": "pending",
+                    "progress": 0,
+                    "created_at": datetime.utcnow(),
+                }
+                if quota_meta:
+                    insert_doc["quota_submission_id"] = quota_meta.get("submission_id")
+                    insert_doc["quota_business_date"] = quota_meta.get("business_date")
+                    insert_doc["quota_cost"] = quota_meta.get("cost", 1)
+
                 result = await db.analysis_tasks.update_one(
                     {"task_id": task_id},
-                    {
-                        "$setOnInsert": {
-                            "task_id": task_id,
-                            "user_id": user_id,
-                            "stock_code": code,
-                            "stock_symbol": code,
-                            "stock_name": name,
-                            "status": "pending",
-                            "progress": 0,
-                            "created_at": datetime.utcnow(),
-                        }
-                    },
+                    {"$setOnInsert": insert_doc},
                     upsert=True,
                 )
 
@@ -931,12 +944,10 @@ class SimpleAnalysisService:
                     )
 
             except Exception as e:
+                # 任务持久化失败必须视为创建失败：
+                # 否则额度预占后没有任务文档，会形成孤儿预占且状态无法查询
                 logger.error(f"❌ 创建任务时写入MongoDB失败: {e}")
-                # 这里不应该忽略错误，因为没有MongoDB记录会导致状态查询失败
-                # 但为了不影响任务执行，我们记录错误但继续执行
-                import traceback
-
-                logger.error(f"❌ MongoDB保存详细错误: {traceback.format_exc()}")
+                raise RuntimeError(f"任务持久化失败: {e}") from e
 
             return {
                 "task_id": task_id,
@@ -1143,6 +1154,16 @@ class SimpleAnalysisService:
             # 同步更新MongoDB状态为完成
             await self._update_task_status(task_id, AnalysisStatus.COMPLETED, 100)
 
+            # 每日额度结算：成功计入 succeeded（幂等，重复调用安全）
+            try:
+                from app.services.analysis_quota_service import (
+                    get_quota_service, OUTCOME_SUCCEEDED,
+                )
+                if get_quota_service().enabled():
+                    await get_quota_service().settle(task_id, OUTCOME_SUCCEEDED)
+            except Exception as quota_err:
+                logger.warning(f"额度结算失败(忽略) {task_id}: {quota_err}")
+
             # 创建通知：分析完成（方案B：REST+SSE）
             try:
                 from app.services.notifications_service import get_notifications_service
@@ -1206,6 +1227,16 @@ class SimpleAnalysisService:
             await self._update_task_status(
                 task_id, AnalysisStatus.FAILED, 0, user_friendly_error
             )
+
+            # 每日额度结算：最终失败释放预占（幂等）
+            try:
+                from app.services.analysis_quota_service import (
+                    get_quota_service, OUTCOME_RELEASED,
+                )
+                if get_quota_service().enabled():
+                    await get_quota_service().settle(task_id, OUTCOME_RELEASED)
+            except Exception as quota_err:
+                logger.warning(f"额度释放失败(忽略) {task_id}: {quota_err}")
         finally:
             # 清理进度跟踪器缓存
             if task_id in self._progress_trackers:
@@ -2656,6 +2687,12 @@ class SimpleAnalysisService:
                 ],
             }
 
+            # 先取出将被清理的僵尸任务ID（更新后筛选条件不再匹配）
+            zombie_ids = [
+                doc.get("task_id")
+                async for doc in db.analysis_tasks.find(zombie_filter, {"task_id": 1})
+            ]
+
             # 更新为失败状态
             update_result = await db.analysis_tasks.update_many(
                 zombie_filter,
@@ -2670,6 +2707,20 @@ class SimpleAnalysisService:
             )
 
             mongo_cleaned = update_result.modified_count
+
+            # 每日额度：按任务ID释放僵尸任务的预占
+            if mongo_cleaned > 0 and zombie_ids:
+                try:
+                    from app.services.analysis_quota_service import (
+                        get_quota_service, OUTCOME_RELEASED,
+                    )
+                    qs = get_quota_service()
+                    if qs.enabled():
+                        for tid in zombie_ids:
+                            if tid:
+                                await qs.settle(tid, OUTCOME_RELEASED)
+                except Exception as quota_err:
+                    logger.warning(f"僵尸任务额度释放失败(忽略): {quota_err}")
 
             logger.info(
                 f"🧹 僵尸任务清理完成: 内存={memory_cleaned}, MongoDB={mongo_cleaned}"

@@ -16,7 +16,7 @@ from app.core.config import settings
 
 from app.services.auth_service import AuthService
 from app.services.user_service import user_service
-from app.models.user import UserCreate, UserUpdate
+from app.models.user import UserCreate, UserUpdate, UserQuotaUpdate
 from app.services.operation_log_service import log_operation
 from app.models.operation_log import ActionType
 from app.services.sms_service import SmsService
@@ -620,6 +620,61 @@ async def create_user(
     except Exception as e:
         logger.error(f"创建用户失败: {e}")
         raise HTTPException(status_code=500, detail=f"创建用户失败: {str(e)}")
+
+@router.put("/users/{username}/daily-quota")
+async def update_user_daily_quota(
+    username: str,
+    payload: UserQuotaUpdate,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """修改用户每日分析额度（仅管理员）。
+
+    新值从修改成功后的新准入请求开始生效；
+    升额不清除当日已用量，降额不取消已接收任务。
+    """
+    if not user.get("is_admin", False):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    try:
+        result = user_service.update_daily_quota(username, payload.daily_quota)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"修改用户每日额度失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="修改每日额度失败")
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    # 审计日志
+    try:
+        await log_operation(
+            user_id=str(user.get("id", "")),
+            username=user.get("username", ""),
+            action_type=ActionType.USER_MANAGEMENT,
+            action="修改用户每日额度",
+            details={
+                "target_username": username,
+                "old_quota": result["old_quota"],
+                "new_quota": result["new_quota"],
+                "reason": payload.reason or "",
+            },
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except Exception as log_err:
+        logger.warning(f"额度修改审计日志写入失败(忽略): {log_err}")
+
+    return {
+        "success": True,
+        "data": {
+            "username": username,
+            "old_quota": result["old_quota"],
+            "daily_quota": result["new_quota"],
+        },
+        "message": "每日额度已更新",
+    }
 
 @router.get("/users")
 async def list_users(

@@ -185,6 +185,9 @@
                     开始批量分析 ({{ stockCodes.length }}只)
                   </el-button>
                 </div>
+                <div v-if="quotaStatus" class="quota-hint" style="margin-top: 12px; font-size: 13px; color: var(--el-text-color-secondary);">
+                  今日剩余分析额度：{{ quotaStatus.remaining }} / {{ quotaStatus.limit }}
+                </div>
               </div>
             </el-form>
           </el-card>
@@ -300,12 +303,31 @@ import { useAuthStore } from '@/stores/auth'
 import ModelConfig from '@/components/ModelConfig.vue'
 import { getMarketByStockCode } from '@/utils/market'
 import { validateStockCode } from '@/utils/stockValidator'
+import type { QuotaStatus } from '@/api/analysis'
 
 // 路由实例（必须在顶层调用）
 const router = useRouter()
 const route = useRoute()
 
 const submitting = ref(false)
+// 批量提交幂等键：同一次提交的重试必须复用同一个键，成功后重置
+const submitIdempotencyKey = ref<string | null>(null)
+
+// 当日分析额度
+const quotaStatus = ref<QuotaStatus | null>(null)
+const loadQuota = async () => {
+  try {
+    const { analysisApi } = await import('@/api/analysis')
+    const res = await analysisApi.getQuota()
+    if (res?.success && res.data?.enabled) {
+      quotaStatus.value = res.data
+    } else {
+      quotaStatus.value = null
+    }
+  } catch {
+    quotaStatus.value = null
+  }
+}
 const stockInput = ref('')
 const stockCodes = ref<string[]>([])  // 保留用于表单绑定
 const symbols = ref<string[]>([])     // 标准化后的代码列表
@@ -408,6 +430,7 @@ const initializeModelSettings = async () => {
 
 // 页面初始化
 onMounted(async () => {
+  loadQuota()
   await initializeModelSettings()
 
   // 🆕 从用户偏好加载默认设置
@@ -527,14 +550,19 @@ const submitBatchAnalysis = async () => {
       }
     }
 
-    // 调用真实的批量分析API
-    const { analysisApi } = await import('@/api/analysis')
-    const response = await analysisApi.startBatchAnalysis(batchRequest)
+    // 调用真实的批量分析API（携带幂等键，防止重试重复扣额度）
+    const { analysisApi, createIdempotencyKey } = await import('@/api/analysis')
+    if (!submitIdempotencyKey.value) {
+      submitIdempotencyKey.value = createIdempotencyKey()
+    }
+    const response = await analysisApi.startBatchAnalysis(batchRequest, submitIdempotencyKey.value)
 
     if (!response?.success) {
       throw new Error(response?.message || '批量分析提交失败')
     }
 
+    submitIdempotencyKey.value = null
+    loadQuota()
     const { batch_id, total_tasks } = response.data
 
     // 显示成功提示并引导用户去任务中心

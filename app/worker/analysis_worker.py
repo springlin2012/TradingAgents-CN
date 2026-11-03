@@ -216,12 +216,20 @@ class AnalysisWorker:
             logger.error(f"发送心跳失败: {e}")
 
     async def _cleanup_loop(self):
-        """清理循环，定期清理过期任务"""
+        """清理循环，定期清理过期任务与孤儿额度预占"""
         while self.running:
             try:
                 await asyncio.sleep(self.cleanup_interval)  # 清理间隔（秒），可配
                 if self.queue_service:
                     await self.queue_service.cleanup_expired_tasks()
+                # 每日额度：恢复孤儿预占（无任务文档且超时的 reserved entry）
+                try:
+                    from app.services.analysis_quota_service import get_quota_service
+                    qs = get_quota_service()
+                    if qs.enabled():
+                        await qs.recover_stale_reservations()
+                except Exception as quota_err:
+                    logger.warning(f"额度预占恢复失败(忽略): {quota_err}")
             except asyncio.CancelledError:
                 break
             except Exception as e:
