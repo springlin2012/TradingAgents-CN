@@ -37,13 +37,47 @@ class UserService:
         self._ensure_identity_indexes()
 
     def _ensure_identity_indexes(self):
-        """手机号 / 微信身份字段使用稀疏唯一索引，兼容存量用户。"""
+        """手机号 / 微信身份字段使用稀疏或部分唯一索引，兼容存量用户。"""
         try:
             self.users_collection.create_index("phone", unique=True, sparse=True)
             self.users_collection.create_index("wechat_openid", unique=True, sparse=True)
-            self.users_collection.create_index("wechat_unionid", unique=True, sparse=True)
+            self._ensure_wechat_unionid_index()
         except Exception as exc:
             logger.warning(f"创建用户身份索引失败（可忽略）: {exc}")
+
+    def _ensure_wechat_unionid_index(self):
+        """wechat_unionid 只对真实字符串建唯一索引，避免 null 占用唯一槽位。
+
+        MongoDB 的 sparse 唯一索引会跳过「字段缺失」，但不会跳过「字段存在且值为 null」。
+        历史上把 wechat_unionid=None 写进文档后，第一个微信用户会占住 null 槽位，
+        后续未返回 unionid 的新用户全部 DuplicateKeyError。
+        存量 null 字段由人工清理，这里只负责把索引迁到部分唯一索引。
+        """
+        index_name = "wechat_unionid_1"
+        desired_filter = {"wechat_unionid": {"$type": "string"}}
+        existing = None
+        for spec in self.users_collection.list_indexes():
+            if spec.get("name") == index_name:
+                existing = spec
+                break
+
+        if existing is not None:
+            same_partial = (
+                existing.get("unique")
+                and existing.get("partialFilterExpression") == desired_filter
+            )
+            if not same_partial:
+                self.users_collection.drop_index(index_name)
+                existing = None
+                logger.info("已删除旧的 wechat_unionid 索引，准备重建为部分唯一索引")
+
+        if existing is None:
+            self.users_collection.create_index(
+                "wechat_unionid",
+                unique=True,
+                partialFilterExpression=desired_filter,
+                name=index_name,
+            )
 
     @staticmethod
     def _default_preferences() -> Dict[str, Any]:
@@ -81,7 +115,7 @@ class UserService:
             "failed_analyses": 0,
             "favorite_stocks": [],
         }
-        doc.update(fields)
+        doc.update({key: value for key, value in fields.items() if value is not None})
         return doc
 
     def _touch_last_login(self, user_id) -> None:
@@ -291,6 +325,7 @@ class UserService:
 
     async def get_or_create_wechat_user(self, openid: str, unionid: Optional[str] = None) -> Optional[User]:
         """微信登录：已有 openid/unionid 则登录，否则自动注册。"""
+        unionid = (unionid or "").strip() or None
         existing = await self.get_user_by_wechat(openid, unionid)
         if existing:
             if not existing.is_active:
@@ -305,23 +340,30 @@ class UserService:
             return await self.get_user_by_username(existing.username)
 
         username = f"wx_{openid}"[:50]
-        user_doc = self._new_user_doc(
+        fields = dict(
             username=username,
             email=f"{openid}@wechat.local",
             wechat_openid=openid,
-            wechat_unionid=unionid,
             is_verified=True,
         )
+        if unionid:
+            fields["wechat_unionid"] = unionid
+        user_doc = self._new_user_doc(**fields)
         try:
             result = self.users_collection.insert_one(user_doc)
             user_doc["_id"] = result.inserted_id
             logger.info("✅ 微信用户自动注册")
             return User(**user_doc)
         except DuplicateKeyError:
+            logger.warning("微信用户自动注册发生唯一键冲突: openid=%s...", openid[:8])
             existing = await self.get_user_by_wechat(openid, unionid)
+            if not existing:
+                existing = await self.get_user_by_username(username)
             if existing:
                 self._touch_last_login(existing.id)
-            return existing
+                return existing
+            logger.error("微信用户唯一键冲突后仍无法定位用户: openid=%s...", openid[:8])
+            return None
         except Exception as e:
             logger.error(f"❌ 创建微信用户失败: {e}")
             return None
