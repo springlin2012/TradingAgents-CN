@@ -187,6 +187,42 @@ def test_updated_at_and_id_stable_source_tiebreak(candidate_db):
     assert search("海") == search("海")
 
 
+def test_code_exact_prefix_padding_and_source_priority(candidate_db):
+    collection, _ = candidate_db
+    collection.insert_many([
+        {"symbol": "600690", "name": "海尔智家", "source": "akshare"},
+        {"symbol": "600690", "name": "海尔智家优先", "source": "tushare"},
+        {"symbol": "600000", "name": "浦发银行", "source": "tushare"},
+        {"code": 1, "name": "平安银行", "source": "akshare"},
+        {"symbol": "000002", "name": "万科A", "source": "tushare"},
+        {"symbol": "000600", "name": "建投能源", "source": "tushare"},
+        {"symbol": "00700", "name": "腾讯控股", "market": "HK"},
+        {"symbol": "600001", "name": "不含代码", "source": "tushare"},
+    ])
+    assert search("600690") == [
+        {"symbol": "600690", "name": "海尔智家优先", "source": "tushare"}
+    ]
+    assert search("000001") == [
+        {"symbol": "000001", "name": "平安银行", "source": "akshare"}
+    ]
+    assert search("1") == [
+        {"symbol": "000001", "name": "平安银行", "source": "akshare"}
+    ]
+    assert [row["symbol"] for row in search("600")] == [
+        "600000", "600001", "600690", "000600"
+    ]
+    assert [row["symbol"] for row in search("00000")] == ["000001", "000002"]
+
+
+def test_digit_keyword_still_matches_name_substring(candidate_db):
+    collection, _ = candidate_db
+    collection.insert_many([
+        {"symbol": "000001", "name": "平安银行", "source": "tushare"},
+        {"symbol": "688001", "name": "华兴源创600", "source": "tushare"},
+    ])
+    assert [row["symbol"] for row in search("600")] == ["688001"]
+
+
 def test_limit_is_applied_after_deduplication_and_capped(candidate_db):
     collection, adapter = candidate_db
     collection.insert_many([
@@ -210,6 +246,27 @@ def test_autocomplete_contract_and_trim(api_client, candidate_db):
         "success": True, "data": [{"symbol": "600001", "name": "海天", "source": "akshare"}],
         "total": 1, "keyword": "海", "source": "mixed", "message": "搜索完成"
     }
+
+
+def test_autocomplete_searches_by_stock_code(api_client, candidate_db):
+    collection, _ = candidate_db
+    collection.insert_many([
+        {"symbol": "600690", "name": "海尔智家", "source": "tushare"},
+        {"symbol": "600000", "name": "浦发银行", "source": "akshare"},
+    ])
+    response = api_client.get("/api/stock-data/search", params={
+        "keyword": " 600690 ", "mode": "autocomplete",
+    })
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": True,
+        "data": [{"symbol": "600690", "name": "海尔智家", "source": "tushare"}],
+        "total": 1, "keyword": "600690", "source": "mixed", "message": "搜索完成",
+    }
+    prefix = api_client.get("/api/stock-data/search", params={
+        "keyword": "600", "mode": "autocomplete",
+    })
+    assert [row["symbol"] for row in prefix.json()["data"]] == ["600000", "600690"]
 
 
 def test_autocomplete_endpoint_caps_limit(api_client, candidate_db):

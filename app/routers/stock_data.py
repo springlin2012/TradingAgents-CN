@@ -213,7 +213,7 @@ async def search_stocks(
     Args:
         keyword: 搜索关键词 (股票代码或名称)
         limit: 返回数量限制
-        mode: 默认搜索或名称候选搜索
+        mode: 默认搜索或名称/代码候选搜索
         
     Returns:
         dict: 搜索结果
@@ -224,7 +224,7 @@ async def search_stocks(
             if not keyword or len(keyword) > 50:
                 raise HTTPException(
                     status_code=422,
-                    detail="名称搜索关键词去除首尾空白后须为1至50个字符",
+                    detail="搜索关键词去除首尾空白后须为1至50个字符",
                 )
             service = get_stock_data_service()
             candidates = await service.search_stock_candidates(keyword, limit)

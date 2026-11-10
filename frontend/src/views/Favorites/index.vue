@@ -248,7 +248,7 @@
             :hide-loading="true"
             :fit-input-width="true"
             value-key="name"
-            placeholder="输入股票名称搜索，如：海尔、平安"
+            placeholder="输入名称或代码搜索，如：海尔、600690"
             clearable
             class="stock-name-input"
             popper-class="stock-name-suggestions"

@@ -150,6 +150,25 @@ test('手填代码不因名称编辑清空；旧代码查名不能覆盖名称�
   } finally { ctx.stop() }
 })
 
+test('输入股票代码也会发起候选搜索', async () => {
+  const ctx = setup()
+  try {
+    let results
+    ctx.form.value.stock_name = '600690'
+    ctx.search.onNameInput('600690')
+    ctx.search.fetchSuggestions('600690', value => { results = value })
+    await delay(330)
+    assert.equal(ctx.requests.length, 1)
+    assert.equal(ctx.requests[0].keyword, '600690')
+    ctx.requests[0].resolve([stock('600690', '海尔智家')])
+    await delay(0)
+    assert.equal(results[0].symbol, '600690')
+    ctx.search.selectStock(results[0])
+    assert.equal(ctx.form.value.stock_code, '600690')
+    assert.equal(ctx.form.value.stock_name, '海尔智家')
+  } finally { ctx.stop() }
+})
+
 test('空白和超长关键词不查询；无结果显示手填提示；销毁清理待发请求', async () => {
   const ctx = setup()
   try {

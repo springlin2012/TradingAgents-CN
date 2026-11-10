@@ -34,20 +34,33 @@ class StockDataService:
     async def search_stock_candidates(
         self, keyword: str, limit: int = 10
     ) -> List[Dict[str, str]]:
-        """按名称字面子串查找 A 股候选，由 MongoDB 完成选源、去重和排序。"""
+        """按名称或代码查找 A 股候选，由 MongoDB 完成选源、去重和排序。"""
         keyword = keyword.strip()
         if not keyword or len(keyword) > 50:
-            raise ValueError("名称搜索关键词须为1至50个字符")
+            raise ValueError("搜索关键词须为1至50个字符")
         limit = max(1, min(limit, 10))
         escaped = re.escape(keyword)
+        code_keyword = bool(re.fullmatch(r"[0-9]{1,6}", keyword))
         source_priority = ["tushare", "multi_source", "akshare", "baostock"]
+        name_match = {
+            "name": {"$type": "string", "$regex": escaped, "$options": "i"},
+        }
+        first_match: Dict[str, Any] = {
+            "market": {"$nin": ["HK", "US"]},
+            "market_info.market": {"$nin": ["HK", "US"]},
+        }
+        if code_keyword:
+            # 数字代码可能是 int 或短字符串，先纳入后再补齐六位过滤。
+            first_match["$or"] = [
+                name_match,
+                {"symbol": {"$exists": True, "$nin": ["", None]}},
+                {"code": {"$exists": True, "$nin": ["", None]}},
+            ]
+        else:
+            first_match.update(name_match)
 
-        pipeline = [
-            {"$match": {
-                "name": {"$type": "string", "$regex": escaped, "$options": "i"},
-                "market": {"$nin": ["HK", "US"]},
-                "market_info.market": {"$nin": ["HK", "US"]},
-            }},
+        pipeline: List[Dict[str, Any]] = [
+            {"$match": first_match},
             {"$set": {
                 "_candidate_code": {"$trim": {"input": {"$convert": {
                     "input": {"$cond": [
@@ -83,6 +96,14 @@ class StockDataService:
                     "default": len(source_priority),
                 }},
             }},
+        ]
+        if code_keyword:
+            pipeline.append({"$match": {"$or": [
+                name_match,
+                {"_candidate_symbol": keyword.zfill(6)},
+                {"_candidate_symbol": {"$regex": f"^{escaped}"}},
+            ]}})
+        pipeline.extend([
             {"$sort": {
                 "_candidate_symbol": 1, "_source_priority": 1,
                 "_candidate_updated_at": -1, "_id": -1,
@@ -93,14 +114,19 @@ class StockDataService:
             {"$replaceRoot": {"newRoot": "$candidate"}},
             {"$set": {"_match_priority": {"$switch": {
                 "branches": [
+                    {"case": {"$eq": ["$_candidate_symbol", keyword if code_keyword else ""]}, "then": 0},
+                    {"case": {"$regexMatch": {
+                        "input": "$_candidate_symbol", "regex": f"^{escaped}",
+                    }}, "then": 1},
+                    {"case": {"$eq": ["$_candidate_symbol", keyword.zfill(6) if code_keyword else ""]}, "then": 2},
                     {"case": {"$regexMatch": {
                         "input": "$name", "regex": f"^{escaped}$", "options": "i",
-                    }}, "then": 0},
+                    }}, "then": 3},
                     {"case": {"$regexMatch": {
                         "input": "$name", "regex": f"^{escaped}", "options": "i",
-                    }}, "then": 1},
+                    }}, "then": 4},
                 ],
-                "default": 2,
+                "default": 5,
             }}}},
             {"$sort": {"_match_priority": 1, "_candidate_symbol": 1}},
             {"$limit": limit},
@@ -108,7 +134,7 @@ class StockDataService:
                 "_id": 0, "symbol": "$_candidate_symbol", "name": 1,
                 "source": "$_candidate_source",
             }},
-        ]
+        ])
         db = get_mongo_db()
         cursor = db[self.basic_info_collection].aggregate(pipeline)
         return await cursor.to_list(length=limit)
