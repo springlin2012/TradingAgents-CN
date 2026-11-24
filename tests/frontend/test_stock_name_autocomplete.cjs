@@ -150,6 +150,29 @@ test('手填代码不因名称编辑清空；旧代码查名不能覆盖名称�
   } finally { ctx.stop() }
 })
 
+test('继续输入完整代码时保留上次候选，直到新结果返回', async () => {
+  const ctx = setup()
+  try {
+    let results
+    ctx.form.value.stock_name = '60069'
+    ctx.search.onNameInput('60069')
+    ctx.search.fetchSuggestions('60069', value => { results = value })
+    await delay(330)
+    ctx.requests[0].resolve([stock('600690', '海尔智家')])
+    await delay(0)
+    assert.equal(results[0].symbol, '600690')
+    ctx.form.value.stock_name = '600690'
+    ctx.search.onNameInput('600690')
+    ctx.search.fetchSuggestions('600690', value => { results = value })
+    await delay(50)
+    assert.equal(results[0].symbol, '600690')
+    await delay(280)
+    ctx.requests[1].resolve([stock('600690', '海尔智家')])
+    await delay(0)
+    assert.equal(results[0].name, '海尔智家')
+  } finally { ctx.stop() }
+})
+
 test('输入股票代码也会发起候选搜索', async () => {
   const ctx = setup()
   try {

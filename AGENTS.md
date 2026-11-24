@@ -47,9 +47,19 @@ Never commit secrets. Copy `.env.example` to `.env` for local keys and service s
 
 - 我是中文用户，在生成文档内容及文档命名时请使用中文，请勿使用英文。
 
-
 ## 文档管理
 
 - 新建文档统一写入当前项目 `docs/` 下按类型划分的子目录：需求 `prd/`、设计 `design/`、分析 `analysis/`、配置 `config/`、规范 `standards/` 、模版 `template/` 等；未列出的类型按同样模式新建语义化子目录，不要堆在 `docs/` 根下。
 - 文件命名用格式：`文件名称_yyyyMMdd` 如：`TEST_20220301.md`。
 - 新增文档时需要更新 `项目知识库索引.md`。
+
+## AI 代码评审提交规则
+
+- 任何代码评审任务，无论是否修改文件、评审成功或发现问题，都必须创建评审提交。
+- 没有待提交文件时，必须执行：
+  `git commit --allow-empty -m "【AI】【当前模型版本】【codeReview】完成当前分支代码评审"`
+- 创建提交前必须执行 `git status`，禁止夹带用户已有改动。
+- 创建提交后必须执行：
+  `git log -1 --format="%h %s"`
+  `git status --short --branch`
+- 未确认最新提交标题包含 `【codeReview】` 前，禁止向用户发送最终回复。

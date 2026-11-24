@@ -50,11 +50,21 @@ class StockDataService:
             "market_info.market": {"$nin": ["HK", "US"]},
         }
         if code_keyword:
-            # 数字代码可能是 int 或短字符串，先纳入后再补齐六位过滤。
+            code_values: List[Any] = [keyword, keyword.zfill(6)]
+            code_values.append(int(keyword))
+            stripped = str(int(keyword))
+            if stripped not in code_values:
+                code_values.append(stripped)
+            prefix = f"^{escaped}"
+            dotted = f"^{escaped}(\\.|$)"
             first_match["$or"] = [
                 name_match,
-                {"symbol": {"$exists": True, "$nin": ["", None]}},
-                {"code": {"$exists": True, "$nin": ["", None]}},
+                {"symbol": {"$in": code_values}},
+                {"code": {"$in": code_values}},
+                {"symbol": {"$regex": prefix}},
+                {"code": {"$regex": prefix}},
+                {"symbol": {"$regex": dotted}},
+                {"full_symbol": {"$regex": dotted}},
             ]
         else:
             first_match.update(name_match)
@@ -62,7 +72,7 @@ class StockDataService:
         pipeline: List[Dict[str, Any]] = [
             {"$match": first_match},
             {"$set": {
-                "_candidate_code": {"$trim": {"input": {"$convert": {
+                "_raw_code": {"$trim": {"input": {"$convert": {
                     "input": {"$cond": [
                         {"$in": [{"$ifNull": ["$symbol", ""]}, ["", None]]},
                         "$code", "$symbol",
@@ -78,6 +88,11 @@ class StockDataService:
                     "input": "$updated_at", "to": "date",
                     "onError": None, "onNull": None,
                 }},
+            }},
+            {"$set": {
+                "_candidate_code": {"$arrayElemAt": [
+                    {"$split": ["$_raw_code", "."]}, 0,
+                ]},
             }},
             {"$match": {"_candidate_code": {"$regex": r"^[0-9]{1,6}$"}}},
             {"$set": {
@@ -136,7 +151,7 @@ class StockDataService:
             }},
         ])
         db = get_mongo_db()
-        cursor = db[self.basic_info_collection].aggregate(pipeline)
+        cursor = db[self.basic_info_collection].aggregate(pipeline, allowDiskUse=True)
         return await cursor.to_list(length=limit)
 
     async def get_stock_basic_info(

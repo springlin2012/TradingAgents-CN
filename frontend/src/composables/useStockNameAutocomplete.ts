@@ -22,13 +22,13 @@ export function useStockNameAutocomplete(
   let selected: StockNameCandidate | null = null
   let automaticName = ''
 
-  const clearSearch = () => {
+  const clearSearch = (clearList = true) => {
     requestVersion++
     clearTimeout(timer)
     timer = undefined
     loading.value = false
     hint.value = ''
-    clearSuggestions()
+    if (clearList) clearSuggestions()
   }
 
   const invalidateInput = () => {
@@ -72,7 +72,7 @@ export function useStockNameAutocomplete(
     if (!visible.value || form.value.market !== 'A股' || keyword !== form.value.stock_name.trim()) {
       return
     }
-    clearSearch()
+    clearSearch(false)
     if (!keyword || keyword.length > 50 || selected?.name === query) {
       if (keyword.length > 50) hint.value = '股票名称搜索最多支持50个字符'
       callback([])

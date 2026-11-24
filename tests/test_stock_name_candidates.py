@@ -198,6 +198,8 @@ def test_code_exact_prefix_padding_and_source_priority(candidate_db):
         {"symbol": "000600", "name": "建投能源", "source": "tushare"},
         {"symbol": "00700", "name": "腾讯控股", "market": "HK"},
         {"symbol": "600001", "name": "不含代码", "source": "tushare"},
+        {"symbol": "000001.SZ", "name": "平安银行带后缀", "source": "tushare"},
+        {"code": "600519", "full_symbol": "600519.SH", "name": "贵州茅台", "source": "tushare"},
     ])
     assert search("600690") == [
         {"symbol": "600690", "name": "海尔智家优先", "source": "tushare"}
@@ -212,6 +214,10 @@ def test_code_exact_prefix_padding_and_source_priority(candidate_db):
         "600000", "600001", "600690", "000600"
     ]
     assert [row["symbol"] for row in search("00000")] == ["000001", "000002"]
+    assert search("000001")[0]["source"] == "tushare"
+    assert search("600519") == [
+        {"symbol": "600519", "name": "贵州茅台", "source": "tushare"}
+    ]
 
 
 def test_digit_keyword_still_matches_name_substring(candidate_db):
